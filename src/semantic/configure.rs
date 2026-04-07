@@ -10,13 +10,13 @@ use ratatui::{
     backend::CrosstermBackend,
     layout::{Alignment, Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
     Frame, Terminal,
 };
 use std::io::{self, Stdout};
 
 /// Available AI providers
-const PROVIDERS: &[&str] = &["groq", "openai", "anthropic"];
+const PROVIDERS: &[&str] = &["groq", "openai", "anthropic", "openrouter"];
 
 /// Available models per provider
 const OPENAI_MODELS: &[&str] = &[
@@ -40,13 +40,23 @@ const GROQ_MODELS: &[&str] = &[
     "qwen/qwen3-32b",
     "moonshotai/kimi-k2-instruct-0905",
 ];
+use crate::semantic::providers::openrouter::OpenRouterModel;
+
+/// Sort strategies for OpenRouter provider routing
+const OPENROUTER_SORT_STRATEGIES: &[(&str, &str)] = &[
+    ("price", "Cheapest provider for the model"),
+    ("speed", "Fastest response time (lowest latency)"),
+    ("throughput", "Highest tokens per second"),
+];
 
 /// Wizard screen states
 #[derive(Debug, Clone, PartialEq)]
 enum WizardScreen {
     ProviderSelection,
     ApiKeyInput,
+    FetchingModels,
     ModelSelection,
+    SortStrategySelection,
     ConnectivityTest,
     Result { success: bool, message: String },
 }
@@ -89,8 +99,13 @@ pub struct ConfigWizard {
     api_key: String,
     api_key_cursor: usize,
     selected_model_idx: usize,
+    selected_sort_idx: usize,
     error_message: Option<String>,
     existing_api_key: Option<String>,
+    /// Dynamically fetched models (OpenRouter)
+    fetched_models: Vec<OpenRouterModel>,
+    /// Current search/filter text for model selection
+    model_filter: String,
 }
 
 impl ConfigWizard {
@@ -101,8 +116,11 @@ impl ConfigWizard {
             api_key: String::new(),
             api_key_cursor: 0,
             selected_model_idx: 0,
+            selected_sort_idx: 0,
             error_message: None,
             existing_api_key: None,
+            fetched_models: Vec::new(),
+            model_filter: String::new(),
         }
     }
 
@@ -111,8 +129,8 @@ impl ConfigWizard {
         PROVIDERS[self.selected_provider_idx]
     }
 
-    /// Get available models for the current provider
-    fn available_models(&self) -> &'static [&'static str] {
+    /// Get available static models for the current provider (non-OpenRouter)
+    fn static_models(&self) -> &'static [&'static str] {
         match self.selected_provider() {
             "openai" => OPENAI_MODELS,
             "anthropic" => ANTHROPIC_MODELS,
@@ -121,10 +139,56 @@ impl ConfigWizard {
         }
     }
 
+    /// Get filtered model IDs for display (considers search filter for OpenRouter)
+    fn filtered_model_ids(&self) -> Vec<String> {
+        if self.selected_provider() == "openrouter" {
+            let filter = self.model_filter.to_lowercase();
+            self.fetched_models
+                .iter()
+                .filter(|m| {
+                    if filter.is_empty() {
+                        return true;
+                    }
+                    m.id.to_lowercase().contains(&filter)
+                        || m.name.to_lowercase().contains(&filter)
+                })
+                .map(|m| m.id.clone())
+                .collect()
+        } else {
+            self.static_models().iter().map(|s| s.to_string()).collect()
+        }
+    }
+
+    /// Get the currently selected sort strategy (OpenRouter only)
+    fn selected_sort(&self) -> &str {
+        OPENROUTER_SORT_STRATEGIES[self.selected_sort_idx].0
+    }
+
     /// Get the currently selected model
-    fn selected_model(&self) -> &str {
-        let models = self.available_models();
-        models[self.selected_model_idx]
+    fn selected_model(&self) -> String {
+        let models = self.filtered_model_ids();
+        if self.selected_model_idx < models.len() {
+            models[self.selected_model_idx].clone()
+        } else if !models.is_empty() {
+            models[0].clone()
+        } else {
+            String::new()
+        }
+    }
+
+    /// Get the OpenRouterModel info for a model ID in the filtered list
+    fn filtered_openrouter_model(&self, idx: usize) -> Option<&OpenRouterModel> {
+        let filter = self.model_filter.to_lowercase();
+        self.fetched_models
+            .iter()
+            .filter(|m| {
+                if filter.is_empty() {
+                    return true;
+                }
+                m.id.to_lowercase().contains(&filter)
+                    || m.name.to_lowercase().contains(&filter)
+            })
+            .nth(idx)
     }
 
     /// Handle keyboard input based on current screen
@@ -137,7 +201,9 @@ impl ConfigWizard {
         match &self.screen {
             WizardScreen::ProviderSelection => self.handle_provider_selection_key(key),
             WizardScreen::ApiKeyInput => self.handle_api_key_input_key(key),
+            WizardScreen::FetchingModels => Ok(false), // No input during fetch
             WizardScreen::ModelSelection => self.handle_model_selection_key(key),
+            WizardScreen::SortStrategySelection => self.handle_sort_strategy_key(key),
             WizardScreen::ConnectivityTest => Ok(false), // No input during test
             WizardScreen::Result { .. } => {
                 // Any key exits on result screen
@@ -221,15 +287,25 @@ impl ConfigWizard {
                         self.api_key = existing_key.clone();
                         self.error_message = None;
                         self.selected_model_idx = 0;
-                        self.screen = WizardScreen::ModelSelection;
+                        self.model_filter.clear();
+                        if self.selected_provider() == "openrouter" {
+                            self.screen = WizardScreen::FetchingModels;
+                        } else {
+                            self.screen = WizardScreen::ModelSelection;
+                        }
                     } else {
                         self.error_message = Some("API key cannot be empty".to_string());
                     }
                 } else {
-                    // Move to model selection with new key
+                    // Move to model selection (or fetching for OpenRouter)
                     self.error_message = None;
                     self.selected_model_idx = 0;
-                    self.screen = WizardScreen::ModelSelection;
+                    self.model_filter.clear();
+                    if self.selected_provider() == "openrouter" {
+                        self.screen = WizardScreen::FetchingModels;
+                    } else {
+                        self.screen = WizardScreen::ModelSelection;
+                    }
                 }
             }
             KeyCode::Esc => {
@@ -243,25 +319,52 @@ impl ConfigWizard {
 
     /// Handle keys for model selection screen
     fn handle_model_selection_key(&mut self, key: KeyEvent) -> Result<bool> {
-        let models = self.available_models();
+        let is_openrouter = self.selected_provider() == "openrouter";
+        let model_count = self.filtered_model_ids().len();
 
         match key.code {
-            KeyCode::Up | KeyCode::Char('k') => {
+            KeyCode::Up => {
                 if self.selected_model_idx > 0 {
                     self.selected_model_idx -= 1;
                 }
             }
-            KeyCode::Down | KeyCode::Char('j') => {
-                if self.selected_model_idx < models.len() - 1 {
+            KeyCode::Down => {
+                if model_count > 0 && self.selected_model_idx < model_count - 1 {
                     self.selected_model_idx += 1;
                 }
             }
+            KeyCode::Char('k') if !is_openrouter => {
+                if self.selected_model_idx > 0 {
+                    self.selected_model_idx -= 1;
+                }
+            }
+            KeyCode::Char('j') if !is_openrouter => {
+                if model_count > 0 && self.selected_model_idx < model_count - 1 {
+                    self.selected_model_idx += 1;
+                }
+            }
+            KeyCode::Char(c) if is_openrouter && !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.model_filter.push(c);
+                self.selected_model_idx = 0;
+            }
+            KeyCode::Backspace if is_openrouter => {
+                self.model_filter.pop();
+                self.selected_model_idx = 0;
+            }
             KeyCode::Enter => {
-                // Move to connectivity test
-                self.screen = WizardScreen::ConnectivityTest;
+                if model_count == 0 {
+                    // No models to select
+                    return Ok(false);
+                }
+                if is_openrouter {
+                    self.selected_sort_idx = 0;
+                    self.screen = WizardScreen::SortStrategySelection;
+                } else {
+                    self.screen = WizardScreen::ConnectivityTest;
+                }
             }
             KeyCode::Esc => {
-                // Go back to API key input
+                self.model_filter.clear();
                 self.screen = WizardScreen::ApiKeyInput;
             }
             _ => {}
@@ -269,12 +372,41 @@ impl ConfigWizard {
         Ok(false)
     }
 
+    /// Handle keys for sort strategy selection screen (OpenRouter only)
+    fn handle_sort_strategy_key(&mut self, key: KeyEvent) -> Result<bool> {
+        match key.code {
+            KeyCode::Up | KeyCode::Char('k') => {
+                if self.selected_sort_idx > 0 {
+                    self.selected_sort_idx -= 1;
+                }
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if self.selected_sort_idx < OPENROUTER_SORT_STRATEGIES.len() - 1 {
+                    self.selected_sort_idx += 1;
+                }
+            }
+            KeyCode::Enter => {
+                self.screen = WizardScreen::ConnectivityTest;
+            }
+            KeyCode::Esc => {
+                // Go back to model selection
+                self.screen = WizardScreen::ModelSelection;
+            }
+            _ => {}
+        }
+        Ok(false)
+    }
+
     /// Render the current screen
-    fn render(&self, frame: &mut Frame) {
-        match &self.screen {
+    fn render(&mut self, frame: &mut Frame) {
+        // Clone screen to avoid borrow conflict with &mut self render methods
+        let screen = self.screen.clone();
+        match &screen {
             WizardScreen::ProviderSelection => self.render_provider_selection(frame),
             WizardScreen::ApiKeyInput => self.render_api_key_input(frame),
+            WizardScreen::FetchingModels => self.render_fetching_models(frame),
             WizardScreen::ModelSelection => self.render_model_selection(frame),
+            WizardScreen::SortStrategySelection => self.render_sort_strategy_selection(frame),
             WizardScreen::ConnectivityTest => self.render_connectivity_test(frame),
             WizardScreen::Result { success, message } => {
                 self.render_result(frame, *success, message)
@@ -283,7 +415,7 @@ impl ConfigWizard {
     }
 
     /// Render provider selection screen
-    fn render_provider_selection(&self, frame: &mut Frame) {
+    fn render_provider_selection(&mut self, frame: &mut Frame) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .margin(2)
@@ -304,38 +436,28 @@ impl ConfigWizard {
         // Provider list
         let providers: Vec<ListItem> = PROVIDERS
             .iter()
-            .enumerate()
-            .map(|(idx, provider)| {
-                let style = if idx == self.selected_provider_idx {
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default()
+            .map(|provider| {
+                let provider_display = match *provider {
+                    "groq" => format!("{} (recommended)", provider),
+                    "openrouter" => format!("{} (200+ models)", provider),
+                    _ => provider.to_string(),
                 };
 
-                let prefix = if idx == self.selected_provider_idx {
-                    "> "
-                } else {
-                    "  "
-                };
-
-                let provider_display = if *provider == "groq" {
-                    format!("{} (recommended)", provider)
-                } else {
-                    provider.to_string()
-                };
-
-                ListItem::new(format!("{}{}", prefix, provider_display)).style(style)
+                ListItem::new(provider_display)
             })
             .collect();
 
-        let list = List::new(providers).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Select AI Provider (↑/↓ to navigate, Enter to select, Esc/q/Ctrl+C to quit)"),
-        );
-        frame.render_widget(list, chunks[1]);
+        let list = List::new(providers)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Select AI Provider (↑/↓ to navigate, Enter to select, Esc/q/Ctrl+C to quit)"),
+            )
+            .highlight_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+            .highlight_symbol("> ");
+
+        let mut list_state = ListState::default().with_selected(Some(self.selected_provider_idx));
+        frame.render_stateful_widget(list, chunks[1], &mut list_state);
 
         // Help text
         let help = Paragraph::new("Use arrow keys or j/k to navigate, Enter to select, Esc/q/Ctrl+C to quit")
@@ -345,7 +467,7 @@ impl ConfigWizard {
     }
 
     /// Render API key input screen
-    fn render_api_key_input(&self, frame: &mut Frame) {
+    fn render_api_key_input(&mut self, frame: &mut Frame) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .margin(2)
@@ -415,7 +537,147 @@ impl ConfigWizard {
     }
 
     /// Render model selection screen
-    fn render_model_selection(&self, frame: &mut Frame) {
+    fn render_model_selection(&mut self, frame: &mut Frame) {
+        let is_openrouter = self.selected_provider() == "openrouter";
+        let filtered = self.filtered_model_ids();
+        let model_count = filtered.len();
+
+        let constraints = if is_openrouter {
+            vec![
+                Constraint::Length(3),  // Title
+                Constraint::Length(3),  // Filter input
+                Constraint::Min(0),     // Model list
+                Constraint::Length(3),  // Help text
+            ]
+        } else {
+            vec![
+                Constraint::Length(3),  // Title
+                Constraint::Min(0),     // Model list
+                Constraint::Length(3),  // Help text
+            ]
+        };
+
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .margin(2)
+            .constraints(constraints)
+            .split(frame.area());
+
+        // Title
+        let title_text = if is_openrouter {
+            format!("Select Model for {} ({} models)", self.selected_provider(), model_count)
+        } else {
+            format!("Select Model for {}", self.selected_provider())
+        };
+        let title = Paragraph::new(title_text)
+            .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+            .alignment(Alignment::Center)
+            .block(Block::default().borders(Borders::ALL));
+        frame.render_widget(title, chunks[0]);
+
+        // Filter input (OpenRouter only)
+        let (list_chunk, help_chunk) = if is_openrouter {
+            let filter_text = format!("{}█", self.model_filter);
+            let filter_input = Paragraph::new(filter_text)
+                .style(Style::default().fg(Color::Yellow))
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title("Filter (type to search)"),
+                );
+            frame.render_widget(filter_input, chunks[1]);
+            (chunks[2], chunks[3])
+        } else {
+            (chunks[1], chunks[2])
+        };
+
+        // Model list
+        if model_count == 0 && is_openrouter {
+            let empty_msg = Paragraph::new("No models match filter")
+                .style(Style::default().fg(Color::DarkGray))
+                .alignment(Alignment::Center)
+                .block(Block::default().borders(Borders::ALL).title("Models"));
+            frame.render_widget(empty_msg, list_chunk);
+        } else {
+            let model_items: Vec<ListItem> = filtered
+                .iter()
+                .enumerate()
+                .map(|(idx, model_id)| {
+                    let model_display = if is_openrouter {
+                        if let Some(m) = self.filtered_openrouter_model(idx) {
+                            format!("{}  ${:.2} / ${:.2} per 1M tokens",
+                                model_id, m.prompt_price, m.completion_price)
+                        } else {
+                            model_id.to_string()
+                        }
+                    } else if idx == 0 {
+                        format!("{} (recommended)", model_id)
+                    } else {
+                        model_id.to_string()
+                    };
+
+                    ListItem::new(model_display)
+                })
+                .collect();
+
+            let list_title = if is_openrouter {
+                "Models (↑/↓ to navigate, type to filter, Enter to select, Esc to go back)"
+            } else {
+                "Select Model (↑/↓ to navigate, Enter to select, Esc to go back, Ctrl+C to quit)"
+            };
+            let list = List::new(model_items)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(list_title),
+                )
+                .highlight_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+                .highlight_symbol("> ");
+
+            let mut list_state = ListState::default().with_selected(Some(self.selected_model_idx));
+            frame.render_stateful_widget(list, list_chunk, &mut list_state);
+        }
+
+        // Help text
+        let help_text = if is_openrouter {
+            "Type to filter, ↑/↓ to navigate, Enter to select, Esc to go back, Ctrl+C to quit"
+        } else {
+            "Use arrow keys or j/k to navigate, Enter to select, Esc to go back, Ctrl+C to quit"
+        };
+        let help = Paragraph::new(help_text)
+            .style(Style::default().fg(Color::DarkGray))
+            .alignment(Alignment::Center);
+        frame.render_widget(help, help_chunk);
+    }
+
+    /// Render fetching models loading screen
+    fn render_fetching_models(&mut self, frame: &mut Frame) {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .margin(2)
+            .constraints([
+                Constraint::Length(3),
+                Constraint::Min(0),
+            ])
+            .split(frame.area());
+
+        // Title
+        let title = Paragraph::new("Fetching Available Models...")
+            .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+            .alignment(Alignment::Center)
+            .block(Block::default().borders(Borders::ALL));
+        frame.render_widget(title, chunks[0]);
+
+        // Loading message
+        let message = Paragraph::new("Loading models from OpenRouter...\n\nPlease wait...")
+            .style(Style::default().fg(Color::Yellow))
+            .alignment(Alignment::Center)
+            .wrap(Wrap { trim: true });
+        frame.render_widget(message, chunks[1]);
+    }
+
+    /// Render sort strategy selection screen (OpenRouter only)
+    fn render_sort_strategy_selection(&mut self, frame: &mut Frame) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .margin(2)
@@ -427,62 +689,48 @@ impl ConfigWizard {
             .split(frame.area());
 
         // Title
-        let title = Paragraph::new(format!(
-            "Select Model for {}",
-            self.selected_provider()
-        ))
-        .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
-        .alignment(Alignment::Center)
-        .block(Block::default().borders(Borders::ALL));
+        let title = Paragraph::new("Select Provider Sort Strategy (OpenRouter)")
+            .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+            .alignment(Alignment::Center)
+            .block(Block::default().borders(Borders::ALL));
         frame.render_widget(title, chunks[0]);
 
-        // Model list
-        let models = self.available_models();
-        let model_items: Vec<ListItem> = models
+        // Sort strategy list
+        let strategy_items: Vec<ListItem> = OPENROUTER_SORT_STRATEGIES
             .iter()
             .enumerate()
-            .map(|(idx, model)| {
-                let style = if idx == self.selected_model_idx {
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD)
+            .map(|(idx, (name, description))| {
+                let display = if idx == 0 {
+                    format!("{} - {} (recommended)", name, description)
                 } else {
-                    Style::default()
+                    format!("{} - {}", name, description)
                 };
 
-                let prefix = if idx == self.selected_model_idx {
-                    "> "
-                } else {
-                    "  "
-                };
-
-                // Add recommended badge for first model
-                let model_display = if idx == 0 {
-                    format!("{} (recommended)", model)
-                } else {
-                    model.to_string()
-                };
-
-                ListItem::new(format!("{}{}", prefix, model_display)).style(style)
+                ListItem::new(display)
             })
             .collect();
 
-        let list = List::new(model_items).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Select Model (↑/↓ to navigate, Enter to select, Esc to go back, Ctrl+C to quit)"),
-        );
-        frame.render_widget(list, chunks[1]);
+        let list = List::new(strategy_items)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Select Sort Strategy (↑/↓ to navigate, Enter to select, Esc to go back)"),
+            )
+            .highlight_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+            .highlight_symbol("> ");
+
+        let mut list_state = ListState::default().with_selected(Some(self.selected_sort_idx));
+        frame.render_stateful_widget(list, chunks[1], &mut list_state);
 
         // Help text
-        let help = Paragraph::new("Use arrow keys or j/k to navigate, Enter to select, Esc to go back, Ctrl+C to quit")
+        let help = Paragraph::new("Controls how OpenRouter selects the upstream provider for your chosen model")
             .style(Style::default().fg(Color::DarkGray))
             .alignment(Alignment::Center);
         frame.render_widget(help, chunks[2]);
     }
 
     /// Render connectivity test screen
-    fn render_connectivity_test(&self, frame: &mut Frame) {
+    fn render_connectivity_test(&mut self, frame: &mut Frame) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .margin(2)
@@ -511,7 +759,7 @@ impl ConfigWizard {
     }
 
     /// Render result screen
-    fn render_result(&self, frame: &mut Frame, success: bool, message: &str) {
+    fn render_result(&mut self, frame: &mut Frame, success: bool, message: &str) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .margin(2)
@@ -596,16 +844,46 @@ fn run_wizard_loop(
         // Render current screen
         terminal.draw(|frame| wizard.render(frame))?;
 
+        // Handle model fetching for OpenRouter
+        if wizard.screen == WizardScreen::FetchingModels {
+            let result = fetch_openrouter_models(&wizard.api_key);
+            match result {
+                Ok(models) => {
+                    wizard.fetched_models = models;
+                    wizard.selected_model_idx = 0;
+                    wizard.screen = WizardScreen::ModelSelection;
+                }
+                Err(e) => {
+                    wizard.screen = WizardScreen::Result {
+                        success: false,
+                        message: format!(
+                            "Failed to fetch models from OpenRouter: {}\n\n\
+                            Please check your API key and try again.",
+                            e
+                        ),
+                    };
+                }
+            }
+            continue;
+        }
+
         // Handle connectivity test asynchronously
         if wizard.screen == WizardScreen::ConnectivityTest {
+            let selected_model = wizard.selected_model();
             let result = test_connectivity(wizard.selected_provider(), &wizard.api_key);
             match result {
                 Ok(_) => {
                     // Save configuration
+                    let sort = if wizard.selected_provider() == "openrouter" {
+                        Some(wizard.selected_sort())
+                    } else {
+                        None
+                    };
                     if let Err(e) = save_user_config(
                         wizard.selected_provider(),
                         &wizard.api_key,
-                        wizard.selected_model(),
+                        &selected_model,
+                        sort,
                     ) {
                         wizard.screen = WizardScreen::Result {
                             success: false,
@@ -664,6 +942,7 @@ fn test_connectivity(provider_name: &str, api_key: &str) -> Result<()> {
             provider_name,
             api_key.to_string(),
             None,
+            None,
         )?;
 
         // Try to make a simple API call to test connectivity
@@ -679,8 +958,17 @@ fn test_connectivity(provider_name: &str, api_key: &str) -> Result<()> {
     Ok(())
 }
 
+/// Fetch models from OpenRouter API (blocking wrapper)
+fn fetch_openrouter_models(api_key: &str) -> Result<Vec<OpenRouterModel>> {
+    let runtime = tokio::runtime::Runtime::new()
+        .context("Failed to create async runtime")?;
+    runtime.block_on(async {
+        crate::semantic::providers::openrouter::fetch_models(api_key).await
+    })
+}
+
 /// Save user configuration to ~/.reflex/config.toml
-fn save_user_config(provider: &str, api_key: &str, model: &str) -> Result<()> {
+fn save_user_config(provider: &str, api_key: &str, model: &str, sort: Option<&str>) -> Result<()> {
     use serde::{Deserialize, Serialize};
     use std::collections::HashMap;
     use std::fs;
@@ -739,6 +1027,11 @@ fn save_user_config(provider: &str, api_key: &str, model: &str) -> Result<()> {
     let model_name = format!("{}_model", provider);
     config.credentials.insert(key_name, api_key.to_string());
     config.credentials.insert(model_name, model.to_string());
+
+    // Save sort strategy for OpenRouter
+    if let Some(sort_value) = sort {
+        config.credentials.insert("openrouter_sort".to_string(), sort_value.to_string());
+    }
 
     // Serialize to TOML
     let toml_content = toml::to_string_pretty(&config)

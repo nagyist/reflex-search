@@ -543,7 +543,7 @@ fn initialize_provider(
     };
 
     // Create provider
-    create_provider(&semantic_config.provider, api_key, model)
+    create_provider(&semantic_config.provider, api_key, model, config::get_provider_options(&semantic_config.provider))
 }
 
 /// Call LLM provider with retry logic (from semantic/mod.rs)

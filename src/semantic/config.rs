@@ -2,6 +2,7 @@
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::env;
 use std::path::Path;
 
@@ -12,7 +13,7 @@ pub struct SemanticConfig {
     #[serde(default = "default_enabled")]
     pub enabled: bool,
 
-    /// LLM provider (openai, anthropic, groq)
+    /// LLM provider (openai, anthropic, groq, openrouter)
     #[serde(default = "default_provider")]
     pub provider: String,
 
@@ -146,11 +147,17 @@ struct Credentials {
     #[serde(default)]
     groq_api_key: Option<String>,
     #[serde(default)]
+    openrouter_api_key: Option<String>,
+    #[serde(default)]
     openai_model: Option<String>,
     #[serde(default)]
     anthropic_model: Option<String>,
     #[serde(default)]
     groq_model: Option<String>,
+    #[serde(default)]
+    openrouter_model: Option<String>,
+    #[serde(default)]
+    openrouter_sort: Option<String>,
 }
 
 /// Load user configuration from ~/.reflex/config.toml
@@ -194,6 +201,7 @@ pub fn get_api_key(provider: &str) -> Result<String> {
                 "openai" => credentials.openai_api_key.as_ref(),
                 "anthropic" => credentials.anthropic_api_key.as_ref(),
                 "groq" => credentials.groq_api_key.as_ref(),
+                "openrouter" => credentials.openrouter_api_key.as_ref(),
                 _ => None,
             };
 
@@ -209,6 +217,7 @@ pub fn get_api_key(provider: &str) -> Result<String> {
         "openai" => "OPENAI_API_KEY",
         "anthropic" => "ANTHROPIC_API_KEY",
         "groq" => "GROQ_API_KEY",
+        "openrouter" => "OPENROUTER_API_KEY",
         _ => anyhow::bail!("Unknown provider: {}", provider),
     };
 
@@ -234,7 +243,7 @@ pub fn get_api_key(provider: &str) -> Result<String> {
 ///
 /// Returns true if at least one API key is found for any provider.
 pub fn is_any_api_key_configured() -> bool {
-    let providers = ["openai", "anthropic", "groq"];
+    let providers = ["openai", "anthropic", "groq", "openrouter"];
 
     // Check user config file first
     if let Ok(Some(user_config)) = load_user_config() {
@@ -243,6 +252,7 @@ pub fn is_any_api_key_configured() -> bool {
             if credentials.openai_api_key.is_some()
                 || credentials.anthropic_api_key.is_some()
                 || credentials.groq_api_key.is_some()
+                || credentials.openrouter_api_key.is_some()
             {
                 log::debug!("Found API key in ~/.reflex/config.toml");
                 return true;
@@ -256,6 +266,7 @@ pub fn is_any_api_key_configured() -> bool {
             "openai" => "OPENAI_API_KEY",
             "anthropic" => "ANTHROPIC_API_KEY",
             "groq" => "GROQ_API_KEY",
+            "openrouter" => "OPENROUTER_API_KEY",
             _ => continue,
         };
 
@@ -280,6 +291,7 @@ pub fn get_user_model(provider: &str) -> Option<String> {
                 "openai" => credentials.openai_model.as_ref(),
                 "anthropic" => credentials.anthropic_model.as_ref(),
                 "groq" => credentials.groq_model.as_ref(),
+                "openrouter" => credentials.openrouter_model.as_ref(),
                 _ => None,
             };
 
@@ -339,6 +351,28 @@ pub fn save_user_provider(provider: &str, model: Option<&str>) -> Result<()> {
         .context("Failed to write ~/.reflex/config.toml")?;
 
     Ok(())
+}
+
+/// Get provider-specific options from user config
+///
+/// Returns `Some(HashMap)` for providers that need extra settings (e.g., OpenRouter sort strategy).
+/// Returns `None` for providers with no additional options.
+pub fn get_provider_options(provider: &str) -> Option<HashMap<String, String>> {
+    if provider.to_lowercase() != "openrouter" {
+        return None;
+    }
+
+    if let Ok(Some(user_config)) = load_user_config() {
+        if let Some(credentials) = &user_config.credentials {
+            if let Some(sort) = &credentials.openrouter_sort {
+                let mut opts = HashMap::new();
+                opts.insert("sort".to_string(), sort.clone());
+                return Some(opts);
+            }
+        }
+    }
+
+    None
 }
 
 #[cfg(test)]

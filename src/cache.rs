@@ -261,7 +261,7 @@ compression_level = 3  # zstd level
 [semantic]
 # Semantic query generation using LLMs
 # Translate natural language questions into rfx query commands
-provider = "groq"  # Options: openai, anthropic, groq
+provider = "groq"  # Options: openai, anthropic, groq, openrouter
 # model = "llama-3.3-70b-versatile"  # Optional: override provider default model
 # auto_execute = false  # Optional: auto-execute queries without confirmation
 "#;

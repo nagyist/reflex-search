@@ -531,7 +531,7 @@ pub enum Command {
         #[arg(short, long)]
         execute: bool,
 
-        /// Override configured LLM provider (openai, anthropic, groq)
+        /// Override configured LLM provider (openai, anthropic, groq, openrouter)
         #[arg(short, long)]
         provider: Option<String>,
 
@@ -2641,6 +2641,7 @@ fn handle_ask(
             &config.provider,
             api_key,
             model,
+            crate::semantic::config::get_provider_options(&config.provider),
         )?;
 
         // Extract codebase context (always available metadata: languages, file counts, directories)

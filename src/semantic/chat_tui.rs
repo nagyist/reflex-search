@@ -1150,7 +1150,7 @@ impl ChatApp {
             config.provider = self.provider_name.clone();
             let api_key = super::config::get_api_key(&config.provider)?;
             let model = self.model_override.clone().or(config.model);
-            super::providers::create_provider(&config.provider, api_key, model)?
+            super::providers::create_provider(&config.provider, api_key, model, super::config::get_provider_options(&config.provider))?
         };
 
         // Build summarization prompt
@@ -1189,7 +1189,7 @@ impl ChatApp {
                  • Provider: {}\n\
                  • Model: {}\n\
                  \n\
-                 Available providers: openai, anthropic, groq\n\
+                 Available providers: openai, anthropic, groq, openrouter\n\
                  \n\
                  Usage:\n\
                  • /model <provider> - Switch provider (uses configured model or default)\n\
@@ -1324,7 +1324,7 @@ async fn triage_question(
         config.provider = provider_name.to_string();
         let api_key = super::config::get_api_key(&config.provider)?;
         let model = model_override.map(|s| s.to_string()).or(config.model);
-        super::providers::create_provider(&config.provider, api_key, model)?
+        super::providers::create_provider(&config.provider, api_key, model, super::config::get_provider_options(&config.provider))?
     };
 
     // Build triage prompt
@@ -1417,7 +1417,7 @@ async fn execute_query_async(
                 config.provider = provider_name.to_string();
                 let api_key = super::config::get_api_key(&config.provider)?;
                 let model = model_override.map(|s| s.to_string()).or(config.model);
-                super::providers::create_provider(&config.provider, api_key, model)
+                super::providers::create_provider(&config.provider, api_key, model, super::config::get_provider_options(&config.provider))
             })() {
                 Ok(provider) => provider,
                 Err(e) => {
@@ -1512,7 +1512,7 @@ async fn execute_query_async(
                                 config.provider = provider_name.to_string();
                                 let api_key = super::config::get_api_key(&config.provider)?;
                                 let model = model_override.map(|s| s.to_string()).or(config.model);
-                                super::providers::create_provider(&config.provider, api_key, model)
+                                super::providers::create_provider(&config.provider, api_key, model, super::config::get_provider_options(&config.provider))
                             })() {
                                 Ok(provider) => provider,
                                 Err(e) => {
@@ -1632,7 +1632,7 @@ async fn execute_query_async(
                 config.provider = provider_name.to_string();
                 let api_key = super::config::get_api_key(&config.provider)?;
                 let model = model_override.map(|s| s.to_string()).or(config.model);
-                super::providers::create_provider(&config.provider, api_key, model)
+                super::providers::create_provider(&config.provider, api_key, model, super::config::get_provider_options(&config.provider))
             })() {
                 Ok(provider) => provider,
                 Err(e) => {

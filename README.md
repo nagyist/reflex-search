@@ -17,7 +17,7 @@ Reflex is a code search engine designed for developers and AI coding assistants.
 - **🖥️ Interactive Mode**: Live TUI for exploring code with instant search and filters
 - **🔄 Incremental**: Only reindexes changed files (blake3 hashing)
 - **🌍 Multi-Language**: Rust, TypeScript/JavaScript, Vue, Svelte, PHP, Python, Go, Java, C, C++, C#, Ruby, Kotlin, Zig
-- **🤖 AI Query Assistant**: Natural language search with `rfx ask` (OpenAI, Anthropic, Groq)
+- **🤖 AI Query Assistant**: Natural language search with `rfx ask` (OpenAI, Anthropic, OpenRouter)
 - **📡 MCP Support**: Model Context Protocol server for AI assistants
 - **📦 Local-First**: Fully offline, all data stays on your machine
 - **🎨 Regex Support**: Trigram-optimized regex search
@@ -74,7 +74,7 @@ Don't want to remember search syntax? Use `rfx ask` to translate natural languag
 
 ### Setup
 
-First-time setup requires configuring an AI provider (OpenAI, Anthropic, or Groq):
+First-time setup requires configuring an AI provider (OpenAI, Anthropic, or OpenRouter):
 
 ```bash
 # Interactive configuration wizard (recommended)
@@ -90,7 +90,7 @@ Configuration is saved to `~/.reflex/config.toml`:
 
 ```toml
 [semantic]
-provider = "openai"  # or anthropic, groq
+provider = "openai"  # or anthropic, openrouter
 
 [credentials]
 openai_api_key = "sk-..."
@@ -118,7 +118,7 @@ One-shot, non-conversational commands that return results directly via CLI.
 rfx ask "Find all TODOs in Rust files"
 
 # Use a specific provider
-rfx ask "Show me error handling code" --provider groq
+rfx ask "Show me error handling code" --provider openrouter
 
 # Agentic mode (multi-step reasoning with automatic context gathering)
 rfx ask "How does authentication work?" --agentic

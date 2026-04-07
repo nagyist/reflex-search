@@ -334,7 +334,7 @@ Located in your home directory's `~/.reflex/` folder.
 **Example**:
 ```toml
 [semantic]
-provider = "openai"  # Options: openai, anthropic, groq
+provider = "openai"  # Options: openai, anthropic, openrouter
 
 [credentials]
 openai_api_key = "sk-..."

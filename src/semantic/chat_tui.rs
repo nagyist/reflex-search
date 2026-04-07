@@ -360,7 +360,6 @@ impl ChatApp {
             match provider_name.to_lowercase().as_str() {
                 "openai" => "gpt-4o-mini".to_string(),
                 "anthropic" => "claude-3-5-haiku-20241022".to_string(),
-                "groq" => "llama-3.3-70b-versatile".to_string(),
                 _ => "unknown".to_string(),
             }
         };
@@ -1189,7 +1188,7 @@ impl ChatApp {
                  • Provider: {}\n\
                  • Model: {}\n\
                  \n\
-                 Available providers: openai, anthropic, groq, openrouter\n\
+                 Available providers: openai, anthropic, openrouter\n\
                  \n\
                  Usage:\n\
                  • /model <provider> - Switch provider (uses configured model or default)\n\
@@ -1205,7 +1204,7 @@ impl ChatApp {
         let new_model_arg = parts.get(2).map(|s| s.to_string());
 
         // Validate provider
-        let valid_providers = ["openai", "anthropic", "groq"];
+        let valid_providers = ["openai", "anthropic", "openrouter"];
         if !valid_providers.contains(&new_provider.as_str()) {
             self.status_message = Some(format!(
                 "Invalid provider '{}'. Available: {}",
@@ -1225,7 +1224,6 @@ impl ChatApp {
             match new_provider.as_str() {
                 "openai" => "gpt-4o-mini".to_string(),
                 "anthropic" => "claude-3-5-haiku-20241022".to_string(),
-                "groq" => "llama-3.3-70b-versatile".to_string(),
                 _ => unreachable!(),
             }
         };

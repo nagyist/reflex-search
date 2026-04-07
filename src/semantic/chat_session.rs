@@ -9,8 +9,6 @@ use serde::{Deserialize, Serialize};
 /// Maximum context window sizes by provider (in tokens)
 const OPENAI_CONTEXT_WINDOW: usize = 128_000;
 const ANTHROPIC_CONTEXT_WINDOW: usize = 200_000;
-const GROQ_CONTEXT_WINDOW: usize = 32_000; // Conservative default for Groq
-
 /// Rough estimate: 4 characters per token (common heuristic)
 const CHARS_PER_TOKEN: usize = 4;
 
@@ -386,7 +384,6 @@ impl ChatSession {
         match provider.to_lowercase().as_str() {
             "openai" => OPENAI_CONTEXT_WINDOW,
             "anthropic" => ANTHROPIC_CONTEXT_WINDOW,
-            "groq" => GROQ_CONTEXT_WINDOW,
             _ => 32_000, // Conservative default
         }
     }
@@ -431,11 +428,11 @@ mod tests {
 
     #[test]
     fn test_context_usage() {
-        let mut session = ChatSession::new("groq".to_string(), "llama-3.3-70b".to_string());
+        let mut session = ChatSession::new("openai".to_string(), "gpt-4o-mini".to_string());
         assert_eq!(session.context_usage(), 0.0);
 
         // Add a message that's roughly 1/4 of the context window
-        let large_text = "a".repeat(GROQ_CONTEXT_WINDOW * CHARS_PER_TOKEN / 4);
+        let large_text = "a".repeat(OPENAI_CONTEXT_WINDOW * CHARS_PER_TOKEN / 4);
         session.add_user_message(large_text);
 
         let usage = session.context_usage();

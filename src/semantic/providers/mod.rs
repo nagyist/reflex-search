@@ -2,7 +2,6 @@
 
 pub mod openai;
 pub mod anthropic;
-pub mod groq;
 pub mod openrouter;
 
 use anyhow::Result;
@@ -44,13 +43,12 @@ pub fn create_provider(
     match provider_name.to_lowercase().as_str() {
         "openai" => Ok(Box::new(openai::OpenAiProvider::new(api_key, model)?)),
         "anthropic" => Ok(Box::new(anthropic::AnthropicProvider::new(api_key, model)?)),
-        "groq" => Ok(Box::new(groq::GroqProvider::new(api_key, model)?)),
         "openrouter" => {
             let sort = options.as_ref().and_then(|o| o.get("sort").cloned());
             Ok(Box::new(openrouter::OpenRouterProvider::new(api_key, model, sort)?))
         }
         _ => anyhow::bail!(
-            "Unknown provider: {}. Supported: openai, anthropic, groq, openrouter",
+            "Unknown provider: {}. Supported: openai, anthropic, openrouter",
             provider_name
         ),
     }

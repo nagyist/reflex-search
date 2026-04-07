@@ -501,7 +501,7 @@ pub enum Command {
     /// Ask a natural language question and generate search queries
     ///
     /// Uses an LLM to translate natural language questions into `rfx query` commands.
-    /// Requires API key configuration for one of: OpenAI, Anthropic, or Groq.
+    /// Requires API key configuration for one of: OpenAI, Anthropic, or OpenRouter.
     ///
     /// If no question is provided, launches interactive chat mode by default.
     ///
@@ -510,19 +510,19 @@ pub enum Command {
     ///      rfx ask --configure
     ///
     ///   2. OR set API key via environment variable:
-    ///      - OPENAI_API_KEY, ANTHROPIC_API_KEY, or GROQ_API_KEY
+    ///      - OPENAI_API_KEY, ANTHROPIC_API_KEY, or OPENROUTER_API_KEY
     ///
     ///   3. Optional: Configure provider in .reflex/config.toml:
     ///      [semantic]
-    ///      provider = "groq"  # or openai, anthropic
-    ///      model = "llama-3.3-70b-versatile"  # optional, defaults to provider default
+    ///      provider = "openai"  # or anthropic, openrouter
+    ///      model = "gpt-5.1-mini"  # optional, defaults to provider default
     ///
     /// Examples:
     ///   rfx ask --configure                           # Interactive setup wizard
     ///   rfx ask                                       # Launch interactive chat (default)
     ///   rfx ask "Find all TODOs in Rust files"
     ///   rfx ask "Where is the main function defined?" --execute
-    ///   rfx ask "Show me error handling code" --provider groq
+    ///   rfx ask "Show me error handling code" --provider openrouter
     Ask {
         /// Natural language question
         question: Option<String>,
@@ -531,7 +531,7 @@ pub enum Command {
         #[arg(short, long)]
         execute: bool,
 
-        /// Override configured LLM provider (openai, anthropic, groq, openrouter)
+        /// Override configured LLM provider (openai, anthropic, openrouter)
         #[arg(short, long)]
         provider: Option<String>,
 
@@ -2462,7 +2462,7 @@ fn handle_ask(
              Alternatively, you can set an environment variable:\n\
              - OPENAI_API_KEY\n\
              - ANTHROPIC_API_KEY\n\
-             - GROQ_API_KEY"
+             - OPENROUTER_API_KEY"
         );
     }
 

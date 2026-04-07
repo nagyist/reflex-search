@@ -16,7 +16,7 @@ use ratatui::{
 use std::io::{self, Stdout};
 
 /// Available AI providers
-const PROVIDERS: &[&str] = &["groq", "openai", "anthropic", "openrouter"];
+const PROVIDERS: &[&str] = &["openai", "anthropic", "openrouter"];
 
 /// Available models per provider
 const OPENAI_MODELS: &[&str] = &[
@@ -31,14 +31,6 @@ const ANTHROPIC_MODELS: &[&str] = &[
     "claude-sonnet-4-5",
     "claude-haiku-4-5",
     "claude-sonnet-4",
-];
-const GROQ_MODELS: &[&str] = &[
-    "openai/gpt-oss-120b",
-    "openai/gpt-oss-20b",
-    "meta-llama/llama-4-maverick-17b-128e-instruct",
-    "meta-llama/llama-4-scout-17b-16e-instruct",
-    "qwen/qwen3-32b",
-    "moonshotai/kimi-k2-instruct-0905",
 ];
 use crate::semantic::providers::openrouter::OpenRouterModel;
 
@@ -87,11 +79,6 @@ fn mask_api_key(key: &str) -> String {
     format!("{}...{}", start, end)
 }
 
-/// Check if a model is an OpenAI GPT-OSS model (requires special handling)
-fn is_gpt_oss_model(model: &str) -> bool {
-    model.starts_with("openai/gpt-oss-")
-}
-
 /// Main configuration wizard state
 pub struct ConfigWizard {
     screen: WizardScreen,
@@ -134,7 +121,6 @@ impl ConfigWizard {
         match self.selected_provider() {
             "openai" => OPENAI_MODELS,
             "anthropic" => ANTHROPIC_MODELS,
-            "groq" => GROQ_MODELS,
             _ => &[],
         }
     }
@@ -438,7 +424,6 @@ impl ConfigWizard {
             .iter()
             .map(|provider| {
                 let provider_display = match *provider {
-                    "groq" => format!("{} (recommended)", provider),
                     "openrouter" => format!("{} (200+ models)", provider),
                     _ => provider.to_string(),
                 };
@@ -946,7 +931,7 @@ fn test_connectivity(provider_name: &str, api_key: &str) -> Result<()> {
         )?;
 
         // Try to make a simple API call to test connectivity
-        // Note: Must contain "json" for OpenAI/Groq structured output requirement
+        // Note: Must contain "json" for OpenAI structured output requirement
         let test_prompt = "Please respond with valid JSON: {\"status\": \"ok\"}";
 
         // Call complete method

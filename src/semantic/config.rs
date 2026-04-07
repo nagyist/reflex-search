@@ -13,7 +13,7 @@ pub struct SemanticConfig {
     #[serde(default = "default_enabled")]
     pub enabled: bool,
 
-    /// LLM provider (openai, anthropic, groq, openrouter)
+    /// LLM provider (openai, anthropic, openrouter)
     #[serde(default = "default_provider")]
     pub provider: String,
 
@@ -145,15 +145,11 @@ struct Credentials {
     #[serde(default)]
     anthropic_api_key: Option<String>,
     #[serde(default)]
-    groq_api_key: Option<String>,
-    #[serde(default)]
     openrouter_api_key: Option<String>,
     #[serde(default)]
     openai_model: Option<String>,
     #[serde(default)]
     anthropic_model: Option<String>,
-    #[serde(default)]
-    groq_model: Option<String>,
     #[serde(default)]
     openrouter_model: Option<String>,
     #[serde(default)]
@@ -200,7 +196,6 @@ pub fn get_api_key(provider: &str) -> Result<String> {
             let key = match provider.to_lowercase().as_str() {
                 "openai" => credentials.openai_api_key.as_ref(),
                 "anthropic" => credentials.anthropic_api_key.as_ref(),
-                "groq" => credentials.groq_api_key.as_ref(),
                 "openrouter" => credentials.openrouter_api_key.as_ref(),
                 _ => None,
             };
@@ -216,7 +211,6 @@ pub fn get_api_key(provider: &str) -> Result<String> {
     let env_var = match provider.to_lowercase().as_str() {
         "openai" => "OPENAI_API_KEY",
         "anthropic" => "ANTHROPIC_API_KEY",
-        "groq" => "GROQ_API_KEY",
         "openrouter" => "OPENROUTER_API_KEY",
         _ => anyhow::bail!("Unknown provider: {}", provider),
     };
@@ -239,11 +233,11 @@ pub fn get_api_key(provider: &str) -> Result<String> {
 ///
 /// Checks in priority order:
 /// 1. ~/.reflex/config.toml (credentials section)
-/// 2. Environment variables (OPENAI_API_KEY, ANTHROPIC_API_KEY, GROQ_API_KEY)
+/// 2. Environment variables (OPENAI_API_KEY, ANTHROPIC_API_KEY, OPENROUTER_API_KEY)
 ///
 /// Returns true if at least one API key is found for any provider.
 pub fn is_any_api_key_configured() -> bool {
-    let providers = ["openai", "anthropic", "groq", "openrouter"];
+    let providers = ["openai", "anthropic", "openrouter"];
 
     // Check user config file first
     if let Ok(Some(user_config)) = load_user_config() {
@@ -251,7 +245,6 @@ pub fn is_any_api_key_configured() -> bool {
             // Check if any provider has an API key in the config file
             if credentials.openai_api_key.is_some()
                 || credentials.anthropic_api_key.is_some()
-                || credentials.groq_api_key.is_some()
                 || credentials.openrouter_api_key.is_some()
             {
                 log::debug!("Found API key in ~/.reflex/config.toml");
@@ -265,7 +258,6 @@ pub fn is_any_api_key_configured() -> bool {
         let env_var = match *provider {
             "openai" => "OPENAI_API_KEY",
             "anthropic" => "ANTHROPIC_API_KEY",
-            "groq" => "GROQ_API_KEY",
             "openrouter" => "OPENROUTER_API_KEY",
             _ => continue,
         };
@@ -290,7 +282,6 @@ pub fn get_user_model(provider: &str) -> Option<String> {
             let model = match provider.to_lowercase().as_str() {
                 "openai" => credentials.openai_model.as_ref(),
                 "anthropic" => credentials.anthropic_model.as_ref(),
-                "groq" => credentials.groq_model.as_ref(),
                 "openrouter" => credentials.openrouter_model.as_ref(),
                 _ => None,
             };
@@ -496,12 +487,12 @@ languages = []
         // Set HOME to temp directory to avoid loading user's config
         unsafe {
             env::set_var("HOME", temp.path());
-            env::remove_var("GROQ_API_KEY");
+            env::remove_var("OPENROUTER_API_KEY");
         }
 
-        let result = get_api_key("groq");
+        let result = get_api_key("openrouter");
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("GROQ_API_KEY"));
+        assert!(result.unwrap_err().to_string().contains("OPENROUTER_API_KEY"));
 
         unsafe {
             env::remove_var("HOME");

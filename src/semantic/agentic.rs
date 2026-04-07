@@ -229,8 +229,10 @@ async fn phase_1_assess(
         eprintln!("{}\n", "=".repeat(80));
     }
 
-    // Call LLM
-    let json_response = call_with_retry(provider, &prompt, 2).await?;
+    // Call LLM — validate against AgenticResponse (requires phase + reasoning)
+    let json_response = call_with_retry(
+        provider, &prompt, 2, super::validate_agentic_response,
+    ).await?;
 
     // Parse response
     let response: AgenticResponse = serde_json::from_str(&json_response)
@@ -396,8 +398,10 @@ async fn phase_3_generate(
         eprintln!("{}\n", "=".repeat(80));
     }
 
-    // Call LLM
-    let json_response = call_with_retry(provider, &prompt, 2).await?;
+    // Call LLM — accepts either AgenticResponse or QueryResponse (fallback path)
+    let json_response = call_with_retry(
+        provider, &prompt, 2, super::validate_agentic_or_query_response,
+    ).await?;
 
     // Parse response - could be AgenticResponse or QueryResponse
     // Try AgenticResponse first (for agentic mode)
@@ -470,8 +474,10 @@ async fn phase_6_refine(
         eprintln!("{}\n", "=".repeat(80));
     }
 
-    // Call LLM for refinement
-    let json_response = call_with_retry(provider, &prompt, 2).await?;
+    // Call LLM for refinement — expects QueryResponse format
+    let json_response = call_with_retry(
+        provider, &prompt, 2, super::validate_query_response,
+    ).await?;
 
     // Parse refined response
     let refined_response: QueryResponse = serde_json::from_str(&json_response)
@@ -551,8 +557,9 @@ async fn call_with_retry(
     provider: &dyn LlmProvider,
     prompt: &str,
     max_retries: usize,
+    validator: impl Fn(&str) -> Result<(), String>,
 ) -> Result<String> {
-    super::call_with_retry(provider, prompt, max_retries).await
+    super::call_with_retry(provider, prompt, max_retries, validator).await
 }
 
 #[cfg(test)]

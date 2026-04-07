@@ -860,6 +860,50 @@ func main() {
 
         assert!(resolved.is_none());
     }
+
+    #[test]
+    fn test_resolve_go_import_root_module_no_leading_slash() {
+        // When go.mod is at the repo root, project_root is "" and paths must not
+        // start with "/" (which would cause ambiguous fuzzy matches in the DB).
+        use tempfile::TempDir;
+        use std::fs;
+
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+
+        // go.mod at repo root → project_root = ""
+        fs::write(
+            root.join("go.mod"),
+            "module k8s.io/kubernetes\n\ngo 1.21\n",
+        ).unwrap();
+
+        let modules = parse_all_go_modules(root).unwrap();
+        assert_eq!(modules.len(), 1);
+        assert_eq!(modules[0].project_root, "");
+
+        // Sub-package import
+        let resolved = resolve_go_import_to_path(
+            "k8s.io/kubernetes/test/internal/metric",
+            &modules,
+            None,
+        );
+        assert!(resolved.is_some());
+        let path = resolved.unwrap();
+        assert!(!path.starts_with('/'), "path must not start with '/': {}", path);
+        assert!(path.ends_with(".go"));
+        assert!(path.contains("test/internal/metric"));
+
+        // Module-root import
+        let resolved = resolve_go_import_to_path(
+            "k8s.io/kubernetes",
+            &modules,
+            None,
+        );
+        assert!(resolved.is_some());
+        let path = resolved.unwrap();
+        assert!(!path.starts_with('/'), "path must not start with '/': {}", path);
+        assert!(path.ends_with(".go"));
+    }
 }
 
 // ============================================================================
@@ -1188,10 +1232,18 @@ pub fn resolve_go_import_to_path(
             if sub_path.is_empty() {
                 // Importing the module root - could be multiple files
                 // Try common patterns
-                let candidates = vec![
-                    format!("{}/main.go", module.project_root),
-                    format!("{}/{}.go", module.project_root, module.name.split('/').last().unwrap_or("main")),
-                ];
+                let basename = module.name.split('/').last().unwrap_or("main");
+                let candidates = if module.project_root.is_empty() {
+                    vec![
+                        "main.go".to_string(),
+                        format!("{}.go", basename),
+                    ]
+                } else {
+                    vec![
+                        format!("{}/main.go", module.project_root),
+                        format!("{}/{}.go", module.project_root, basename),
+                    ]
+                };
 
                 for candidate in candidates {
                     log::trace!("Checking Go module root: {}", candidate);
@@ -1201,10 +1253,17 @@ pub fn resolve_go_import_to_path(
                 // Sub-package import
                 // Try both single file and package directory patterns
                 let package_name = sub_path.split('/').last().unwrap_or(sub_path);
-                let candidates = vec![
-                    format!("{}/{}.go", module.project_root, sub_path),
-                    format!("{}/{}/{}.go", module.project_root, sub_path, package_name),
-                ];
+                let candidates = if module.project_root.is_empty() {
+                    vec![
+                        format!("{}.go", sub_path),
+                        format!("{}/{}.go", sub_path, package_name),
+                    ]
+                } else {
+                    vec![
+                        format!("{}/{}.go", module.project_root, sub_path),
+                        format!("{}/{}/{}.go", module.project_root, sub_path, package_name),
+                    ]
+                };
 
                 for candidate in candidates {
                     log::trace!("Checking Go package path: {}", candidate);

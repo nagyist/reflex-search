@@ -904,20 +904,11 @@ fn handle_index_build(path: &PathBuf, force: &bool, languages: &[String], quiet:
     // Parse language filters
     let lang_filters: Vec<Language> = languages
         .iter()
-        .filter_map(|s| match s.to_lowercase().as_str() {
-            "rust" | "rs" => Some(Language::Rust),
-            "python" | "py" => Some(Language::Python),
-            "javascript" | "js" => Some(Language::JavaScript),
-            "typescript" | "ts" => Some(Language::TypeScript),
-            "go" => Some(Language::Go),
-            "java" => Some(Language::Java),
-            "php" => Some(Language::PHP),
-            "c" => Some(Language::C),
-            "cpp" | "c++" => Some(Language::Cpp),
-            _ => {
-                output::warn(&format!("Unknown language: {}", s));
+        .filter_map(|s| {
+            Language::from_name(s).or_else(|| {
+                output::warn(&format!("Unknown language: '{}'. Supported: {}", s, Language::supported_names_help()));
                 None
-            }
+            })
         })
         .collect();
 
@@ -1092,47 +1083,12 @@ fn handle_query(
 
     // Parse and validate language filter
     let language = if let Some(lang_str) = lang.as_deref() {
-        match lang_str.to_lowercase().as_str() {
-            "rust" | "rs" => Some(Language::Rust),
-            "python" | "py" => Some(Language::Python),
-            "javascript" | "js" => Some(Language::JavaScript),
-            "typescript" | "ts" => Some(Language::TypeScript),
-            "vue" => Some(Language::Vue),
-            "svelte" => Some(Language::Svelte),
-            "go" => Some(Language::Go),
-            "java" => Some(Language::Java),
-            "php" => Some(Language::PHP),
-            "c" => Some(Language::C),
-            "cpp" | "c++" => Some(Language::Cpp),
-            "csharp" | "cs" | "c#" => Some(Language::CSharp),
-            "ruby" | "rb" => Some(Language::Ruby),
-            "kotlin" | "kt" => Some(Language::Kotlin),
-            "zig" => Some(Language::Zig),
-            _ => {
-                anyhow::bail!(
-                    "Unknown language: '{}'\n\
-                     \n\
-                     Supported languages:\n\
-                     • rust, rs\n\
-                     • python, py\n\
-                     • javascript, js\n\
-                     • typescript, ts\n\
-                     • vue\n\
-                     • svelte\n\
-                     • go\n\
-                     • java\n\
-                     • php\n\
-                     • c\n\
-                     • c++, cpp\n\
-                     • c#, csharp, cs\n\
-                     • ruby, rb\n\
-                     • kotlin, kt\n\
-                     • zig\n\
-                     \n\
-                     Example: rfx query \"pattern\" --lang rust",
-                    lang_str
-                );
-            }
+        match Language::from_name(lang_str) {
+            Some(l) => Some(l),
+            None => anyhow::bail!(
+                "Unknown language: '{}'\n\nSupported languages:\n  {}\n\nExample: rfx query \"pattern\" --lang rust",
+                lang_str, Language::supported_names_help()
+            ),
         }
     } else {
         None
@@ -1684,24 +1640,12 @@ async fn run_server(port: u16, host: String) -> Result<()> {
 
         // Parse language filter
         let language = if let Some(lang_str) = params.lang.as_deref() {
-            match lang_str.to_lowercase().as_str() {
-                "rust" | "rs" => Some(Language::Rust),
-                "javascript" | "js" => Some(Language::JavaScript),
-                "typescript" | "ts" => Some(Language::TypeScript),
-                "vue" => Some(Language::Vue),
-                "svelte" => Some(Language::Svelte),
-                "php" => Some(Language::PHP),
-                "python" | "py" => Some(Language::Python),
-                "go" => Some(Language::Go),
-                "java" => Some(Language::Java),
-                "c" => Some(Language::C),
-                "cpp" | "c++" => Some(Language::Cpp),
-                _ => {
-                    return Err((
-                        StatusCode::BAD_REQUEST,
-                        format!("Unknown language '{}'. Supported languages: rust, javascript (js), typescript (ts), vue, svelte, php, python (py), go, java, c, cpp (c++)", lang_str)
-                    ));
-                }
+            match Language::from_name(lang_str) {
+                Some(l) => Some(l),
+                None => return Err((
+                    StatusCode::BAD_REQUEST,
+                    format!("Unknown language '{}'. Supported: {}", lang_str, Language::supported_names_help())
+                )),
             }
         } else {
             None

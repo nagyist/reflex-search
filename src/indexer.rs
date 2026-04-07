@@ -920,15 +920,19 @@ impl Indexer {
                             &php_psr4_mappings,
                         ) {
                             // Look up file ID in database using exact match
-                            match dep_index.get_file_id_by_path(&resolved_path)? {
-                                Some(id) => {
+                            match dep_index.get_file_id_by_path(&resolved_path) {
+                                Ok(Some(id)) => {
                                     log::trace!("Resolved PHP dependency: {} -> {} (file_id={})",
                                                import_info.imported_path, resolved_path, id);
                                     Some(id)
                                 }
-                                None => {
+                                Ok(None) => {
                                     log::trace!("PHP dependency resolved to path but file not in index: {} -> {}",
                                                import_info.imported_path, resolved_path);
+                                    None
+                                }
+                                Err(e) => {
+                                    log::debug!("Skipping PHP dependency resolution for '{}': {}", resolved_path, e);
                                     None
                                 }
                             }
@@ -945,15 +949,19 @@ impl Indexer {
                             Some(&file_path),
                         ) {
                             // Look up file ID in database using exact match
-                            match dep_index.get_file_id_by_path(&resolved_path)? {
-                                Some(id) => {
+                            match dep_index.get_file_id_by_path(&resolved_path) {
+                                Ok(Some(id)) => {
                                     log::trace!("Resolved Python dependency: {} -> {} (file_id={})",
                                                import_info.imported_path, resolved_path, id);
                                     Some(id)
                                 }
-                                None => {
+                                Ok(None) => {
                                     log::trace!("Python dependency resolved to path but file not in index: {} -> {}",
                                                import_info.imported_path, resolved_path);
+                                    None
+                                }
+                                Err(e) => {
+                                    log::debug!("Skipping Python dependency resolution for '{}': {}", resolved_path, e);
                                     None
                                 }
                             }
@@ -969,15 +977,19 @@ impl Indexer {
                             Some(&file_path),
                         ) {
                             // Look up file ID in database using exact match
-                            match dep_index.get_file_id_by_path(&resolved_path)? {
-                                Some(id) => {
+                            match dep_index.get_file_id_by_path(&resolved_path) {
+                                Ok(Some(id)) => {
                                     log::trace!("Resolved Go dependency: {} -> {} (file_id={})",
                                                import_info.imported_path, resolved_path, id);
                                     Some(id)
                                 }
-                                None => {
+                                Ok(None) => {
                                     log::trace!("Go dependency resolved to path but file not in index: {} -> {}",
                                                import_info.imported_path, resolved_path);
+                                    None
+                                }
+                                Err(e) => {
+                                    log::debug!("Skipping Go dependency resolution for '{}': {}", resolved_path, e);
                                     None
                                 }
                             }
@@ -1012,15 +1024,18 @@ impl Indexer {
                                 };
 
                                 log::debug!("Looking up TS/JS candidate: '{}' (from '{}')", normalized_candidate, candidate_path);
-                                match dep_index.get_file_id_by_path(&normalized_candidate)? {
-                                    Some(id) => {
+                                match dep_index.get_file_id_by_path(&normalized_candidate) {
+                                    Ok(Some(id)) => {
                                         log::debug!("Resolved TS/JS dependency: {} -> {} (file_id={})",
                                                    import_info.imported_path, normalized_candidate, id);
                                         resolved_id = Some(id);
                                         break; // Found a match, stop trying
                                     }
-                                    None => {
+                                    Ok(None) => {
                                         log::trace!("TS/JS candidate not in index: {}", candidate_path);
+                                    }
+                                    Err(e) => {
+                                        log::debug!("Skipping TS/JS dependency resolution for '{}': {}", normalized_candidate, e);
                                     }
                                 }
                             }
@@ -1043,15 +1058,19 @@ impl Indexer {
                             Some(root.to_str().unwrap_or("")),
                         ) {
                             // Look up file ID in database using exact match
-                            match dep_index.get_file_id_by_path(&resolved_path)? {
-                                Some(id) => {
+                            match dep_index.get_file_id_by_path(&resolved_path) {
+                                Ok(Some(id)) => {
                                     log::trace!("Resolved Rust dependency: {} -> {} (file_id={})",
                                                import_info.imported_path, resolved_path, id);
                                     Some(id)
                                 }
-                                None => {
+                                Ok(None) => {
                                     log::trace!("Rust dependency resolved to path but file not in index: {} -> {}",
                                                import_info.imported_path, resolved_path);
+                                    None
+                                }
+                                Err(e) => {
+                                    log::debug!("Skipping Rust dependency resolution for '{}': {}", resolved_path, e);
                                     None
                                 }
                             }
@@ -1067,15 +1086,19 @@ impl Indexer {
                             Some(&file_path),
                         ) {
                             // Look up file ID in database using exact match
-                            match dep_index.get_file_id_by_path(&resolved_path)? {
-                                Some(id) => {
+                            match dep_index.get_file_id_by_path(&resolved_path) {
+                                Ok(Some(id)) => {
                                     log::trace!("Resolved Java dependency: {} -> {} (file_id={})",
                                                import_info.imported_path, resolved_path, id);
                                     Some(id)
                                 }
-                                None => {
+                                Ok(None) => {
                                     log::trace!("Java dependency resolved to path but file not in index: {} -> {}",
                                                import_info.imported_path, resolved_path);
+                                    None
+                                }
+                                Err(e) => {
+                                    log::debug!("Skipping Java dependency resolution for '{}': {}", resolved_path, e);
                                     None
                                 }
                             }
@@ -1091,15 +1114,19 @@ impl Indexer {
                             Some(&file_path),
                         ) {
                             // Look up file ID in database using exact match
-                            match dep_index.get_file_id_by_path(&resolved_path)? {
-                                Some(id) => {
+                            match dep_index.get_file_id_by_path(&resolved_path) {
+                                Ok(Some(id)) => {
                                     log::trace!("Resolved Kotlin dependency: {} -> {} (file_id={})",
                                                import_info.imported_path, resolved_path, id);
                                     Some(id)
                                 }
-                                None => {
+                                Ok(None) => {
                                     log::trace!("Kotlin dependency resolved to path but file not in index: {} -> {}",
                                                import_info.imported_path, resolved_path);
+                                    None
+                                }
+                                Err(e) => {
+                                    log::debug!("Skipping Kotlin dependency resolution for '{}': {}", resolved_path, e);
                                     None
                                 }
                             }
@@ -1115,15 +1142,19 @@ impl Indexer {
                             Some(&file_path),
                         ) {
                             // Look up file ID in database using exact match
-                            match dep_index.get_file_id_by_path(&resolved_path)? {
-                                Some(id) => {
+                            match dep_index.get_file_id_by_path(&resolved_path) {
+                                Ok(Some(id)) => {
                                     log::trace!("Resolved Ruby dependency: {} -> {} (file_id={})",
                                                import_info.imported_path, resolved_path, id);
                                     Some(id)
                                 }
-                                None => {
+                                Ok(None) => {
                                     log::trace!("Ruby dependency resolved to path but file not in index: {} -> {}",
                                                import_info.imported_path, resolved_path);
+                                    None
+                                }
+                                Err(e) => {
+                                    log::debug!("Skipping Ruby dependency resolution for '{}': {}", resolved_path, e);
                                     None
                                 }
                             }
@@ -1138,15 +1169,19 @@ impl Indexer {
                             Some(&file_path),
                         ) {
                             // Look up file ID in database using exact match
-                            match dep_index.get_file_id_by_path(&resolved_path)? {
-                                Some(id) => {
+                            match dep_index.get_file_id_by_path(&resolved_path) {
+                                Ok(Some(id)) => {
                                     log::trace!("Resolved C dependency: {} -> {} (file_id={})",
                                                import_info.imported_path, resolved_path, id);
                                     Some(id)
                                 }
-                                None => {
+                                Ok(None) => {
                                     log::trace!("C dependency resolved to path but file not in index: {} -> {}",
                                                import_info.imported_path, resolved_path);
+                                    None
+                                }
+                                Err(e) => {
+                                    log::debug!("Skipping C dependency resolution for '{}': {}", resolved_path, e);
                                     None
                                 }
                             }
@@ -1163,15 +1198,19 @@ impl Indexer {
                             Some(&file_path),
                         ) {
                             // Look up file ID in database using exact match
-                            match dep_index.get_file_id_by_path(&resolved_path)? {
-                                Some(id) => {
+                            match dep_index.get_file_id_by_path(&resolved_path) {
+                                Ok(Some(id)) => {
                                     log::trace!("Resolved C++ dependency: {} -> {} (file_id={})",
                                                import_info.imported_path, resolved_path, id);
                                     Some(id)
                                 }
-                                None => {
+                                Ok(None) => {
                                     log::trace!("C++ dependency resolved to path but file not in index: {} -> {}",
                                                import_info.imported_path, resolved_path);
+                                    None
+                                }
+                                Err(e) => {
+                                    log::debug!("Skipping C++ dependency resolution for '{}': {}", resolved_path, e);
                                     None
                                 }
                             }
@@ -1186,15 +1225,19 @@ impl Indexer {
                             Some(&file_path),
                         ) {
                             // Look up file ID in database using exact match
-                            match dep_index.get_file_id_by_path(&resolved_path)? {
-                                Some(id) => {
+                            match dep_index.get_file_id_by_path(&resolved_path) {
+                                Ok(Some(id)) => {
                                     log::trace!("Resolved C# dependency: {} -> {} (file_id={})",
                                                import_info.imported_path, resolved_path, id);
                                     Some(id)
                                 }
-                                None => {
+                                Ok(None) => {
                                     log::trace!("C# dependency resolved to path but file not in index: {} -> {}",
                                                import_info.imported_path, resolved_path);
+                                    None
+                                }
+                                Err(e) => {
+                                    log::debug!("Skipping C# dependency resolution for '{}': {}", resolved_path, e);
                                     None
                                 }
                             }
@@ -1209,15 +1252,19 @@ impl Indexer {
                             Some(&file_path),
                         ) {
                             // Look up file ID in database using exact match
-                            match dep_index.get_file_id_by_path(&resolved_path)? {
-                                Some(id) => {
+                            match dep_index.get_file_id_by_path(&resolved_path) {
+                                Ok(Some(id)) => {
                                     log::trace!("Resolved Zig dependency: {} -> {} (file_id={})",
                                                import_info.imported_path, resolved_path, id);
                                     Some(id)
                                 }
-                                None => {
+                                Ok(None) => {
                                     log::trace!("Zig dependency resolved to path but file not in index: {} -> {}",
                                                import_info.imported_path, resolved_path);
+                                    None
+                                }
+                                Err(e) => {
+                                    log::debug!("Skipping Zig dependency resolution for '{}': {}", resolved_path, e);
                                     None
                                 }
                             }
@@ -1248,15 +1295,18 @@ impl Indexer {
                                     candidate_path.to_string()
                                 };
 
-                                match dep_index.get_file_id_by_path(&normalized_candidate)? {
-                                    Some(id) => {
+                                match dep_index.get_file_id_by_path(&normalized_candidate) {
+                                    Ok(Some(id)) => {
                                         log::trace!("Resolved Vue/Svelte dependency: {} -> {} (file_id={})",
                                                    import_info.imported_path, candidate_path, id);
                                         resolved_id = Some(id);
                                         break; // Found a match, stop trying
                                     }
-                                    None => {
+                                    Ok(None) => {
                                         log::trace!("Vue/Svelte candidate not in index: {}", candidate_path);
+                                    }
+                                    Err(e) => {
+                                        log::debug!("Skipping Vue/Svelte dependency resolution for '{}': {}", normalized_candidate, e);
                                     }
                                 }
                             }
@@ -1359,15 +1409,18 @@ impl Indexer {
                                     candidate_path.to_string()
                                 };
 
-                                match dep_index.get_file_id_by_path(&normalized_candidate)? {
-                                    Some(id) => {
+                                match dep_index.get_file_id_by_path(&normalized_candidate) {
+                                    Ok(Some(id)) => {
                                         log::trace!("Resolved export source: {} -> {} (file_id={})",
                                                    export_info.source_path, normalized_candidate, id);
                                         resolved_id = Some(id);
                                         break; // Found a match, stop trying
                                     }
-                                    None => {
+                                    Ok(None) => {
                                         log::trace!("Export source candidate not in index: {}", candidate_path);
+                                    }
+                                    Err(e) => {
+                                        log::debug!("Skipping export source resolution for '{}': {}", normalized_candidate, e);
                                     }
                                 }
                             }
@@ -1497,6 +1550,12 @@ impl Indexer {
                 log::debug!("Skipping {} ({:?} parser not yet implemented)",
                            path.display(), lang);
             }
+            return false;
+        }
+
+        // If specific languages are configured, only index those
+        if !self.config.languages.is_empty() && !self.config.languages.contains(&lang) {
+            log::debug!("Skipping {} ({:?} not in configured languages)", path.display(), lang);
             return false;
         }
 

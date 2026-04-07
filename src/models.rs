@@ -102,6 +102,37 @@ impl Language {
         }
     }
 
+    /// Parse a language from a human-friendly name (CLI/API input)
+    ///
+    /// Accepts lowercase names and common aliases.
+    /// Returns None for unrecognized names.
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name.to_lowercase().as_str() {
+            "rust" | "rs" => Some(Language::Rust),
+            "python" | "py" => Some(Language::Python),
+            "javascript" | "js" => Some(Language::JavaScript),
+            "typescript" | "ts" => Some(Language::TypeScript),
+            "vue" => Some(Language::Vue),
+            "svelte" => Some(Language::Svelte),
+            "go" => Some(Language::Go),
+            "java" => Some(Language::Java),
+            "php" => Some(Language::PHP),
+            "c" => Some(Language::C),
+            "cpp" | "c++" => Some(Language::Cpp),
+            "csharp" | "cs" | "c#" => Some(Language::CSharp),
+            "ruby" | "rb" => Some(Language::Ruby),
+            "kotlin" | "kt" => Some(Language::Kotlin),
+            "zig" => Some(Language::Zig),
+            _ => None,
+        }
+    }
+
+    /// Human-readable list of all supported language names (for error messages)
+    pub fn supported_names_help() -> &'static str {
+        "rust (rs), python (py), javascript (js), typescript (ts), vue, svelte, \
+         go, java, php, c, cpp (c++), csharp (cs, c#), ruby (rb), kotlin (kt), zig"
+    }
+
     /// Check if this language has a parser implementation
     ///
     /// Returns true only for languages with working Tree-sitter parsers.

@@ -11,7 +11,13 @@ use std::collections::HashMap;
 
 use crate::cache::CacheManager;
 use crate::dependency::DependencyIndex;
+use crate::models::{Language, SymbolKind};
+use crate::parsers::ParserFactory;
 use crate::semantic::context::CodebaseContext;
+use crate::semantic::providers::LlmProvider;
+
+use super::llm_cache::LlmCache;
+use super::narrate;
 
 /// A detected module in the codebase
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -89,7 +95,10 @@ pub fn generate_wiki_page(
     cache: &CacheManager,
     module: &ModuleDefinition,
     diff: Option<&super::diff::SnapshotDiff>,
-    _no_llm: bool,
+    no_llm: bool,
+    provider: Option<&dyn LlmProvider>,
+    llm_cache: Option<&LlmCache>,
+    snapshot_id: &str,
 ) -> Result<WikiPage> {
     let db_path = cache.path().join("meta.db");
     let conn = Connection::open(&db_path)?;
@@ -99,15 +108,42 @@ pub fn generate_wiki_page(
     let structure = build_structure_section(&conn, &module.path)?;
     let dependencies = build_dependencies_section(&conn, &module.path)?;
     let dependents = build_dependents_section(&conn, &deps_index, &module.path)?;
-    let key_symbols = "[Symbol extraction requires query engine]".to_string();
+    let key_symbols = build_key_symbols_section(&conn, &module.path);
     let metrics = build_metrics_section(module);
     let recent_changes = diff.map(|d| build_recent_changes(d, &module.path));
+
+    // Generate LLM summary when provider is available
+    let summary = if !no_llm {
+        if let (Some(provider), Some(llm_cache)) = (provider, llm_cache) {
+            // Build combined structural context for the summary
+            let mut context = String::new();
+            context.push_str(&format!("Module: {}\n\n", module.path));
+            context.push_str(&format!("## Structure\n{}\n\n", structure));
+            context.push_str(&format!("## Dependencies\n{}\n\n", dependencies));
+            context.push_str(&format!("## Dependents\n{}\n\n", dependents));
+            context.push_str(&format!("## Key Symbols\n{}\n\n", key_symbols));
+            context.push_str(&format!("## Metrics\n{}\n", metrics));
+
+            narrate::narrate_section(
+                provider,
+                narrate::wiki_system_prompt(),
+                &context,
+                llm_cache,
+                snapshot_id,
+                &module.path,
+            )
+        } else {
+            None
+        }
+    } else {
+        None
+    };
 
     Ok(WikiPage {
         module_path: module.path.clone(),
         title: format!("{}/", module.path),
         sections: WikiSections {
-            summary: None, // LLM-generated, not included in structural-only mode
+            summary,
             structure,
             dependencies,
             dependents,
@@ -119,16 +155,33 @@ pub fn generate_wiki_page(
 }
 
 /// Generate wiki pages for all detected modules
+///
+/// `provider` and `llm_cache` are created by the caller (site.rs or CLI handler).
 pub fn generate_all_pages(
     cache: &CacheManager,
     diff: Option<&super::diff::SnapshotDiff>,
     no_llm: bool,
+    snapshot_id: &str,
+    provider: Option<&dyn LlmProvider>,
+    llm_cache: Option<&LlmCache>,
 ) -> Result<Vec<WikiPage>> {
     let modules = detect_modules(cache)?;
     let mut pages = Vec::new();
 
+    if provider.is_some() {
+        eprintln!("Generating wiki summaries...");
+    }
+
     for module in &modules {
-        match generate_wiki_page(cache, module, diff, no_llm) {
+        match generate_wiki_page(
+            cache,
+            module,
+            diff,
+            no_llm,
+            provider,
+            llm_cache,
+            snapshot_id,
+        ) {
             Ok(page) => pages.push(page),
             Err(e) => {
                 log::warn!("Failed to generate wiki page for {}: {}", module.path, e);
@@ -312,6 +365,128 @@ fn build_dependents_section(conn: &Connection, _deps_index: &DependencyIndex, mo
         content.push_str(&format!("- `{}`\n", dep));
     }
     Ok(content)
+}
+
+fn build_key_symbols_section(conn: &Connection, module_path: &str) -> String {
+    let pattern = format!("{}/%", module_path);
+    let mut stmt = match conn.prepare(
+        "SELECT path, language FROM files
+         WHERE path LIKE ?1 AND language IS NOT NULL
+         ORDER BY COALESCE(line_count, 0) DESC
+         LIMIT 20"
+    ) {
+        Ok(s) => s,
+        Err(_) => return "No symbols extracted.".to_string(),
+    };
+
+    let files: Vec<(String, String)> = match stmt.query_map([&pattern], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    }) {
+        Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+        Err(_) => return "No symbols extracted.".to_string(),
+    };
+
+    if files.is_empty() {
+        return "No files in this module.".to_string();
+    }
+
+    // Parse each file and collect symbols
+    let mut by_kind: HashMap<String, Vec<(String, String, usize)>> = HashMap::new(); // kind -> [(name, path, size)]
+    let mut total_symbols = 0usize;
+
+    for (path, lang_str) in &files {
+        let language = match Language::from_name(lang_str) {
+            Some(l) => l,
+            None => continue,
+        };
+
+        // Read source from disk
+        let source = match std::fs::read_to_string(path) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+
+        let symbols = match ParserFactory::parse(path, &source, language) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+
+        for sym in symbols {
+            if let Some(name) = &sym.symbol {
+                // Skip imports, exports, and unknown kinds
+                match &sym.kind {
+                    SymbolKind::Import | SymbolKind::Export | SymbolKind::Unknown(_) => continue,
+                    _ => {}
+                }
+
+                let kind_name = format!("{}", sym.kind);
+                let size = sym.span.end_line.saturating_sub(sym.span.start_line) + 1;
+                by_kind
+                    .entry(kind_name)
+                    .or_default()
+                    .push((name.clone(), path.clone(), size));
+                total_symbols += 1;
+            }
+        }
+    }
+
+    if total_symbols == 0 {
+        return "No symbols extracted.".to_string();
+    }
+
+    // Sort each kind by size (descending) and take top 10
+    let display_order = [
+        "Function", "Struct", "Class", "Trait", "Interface",
+        "Enum", "Method", "Constant", "Type", "Macro",
+        "Variable", "Module", "Namespace", "Property", "Attribute",
+    ];
+
+    let mut content = String::new();
+    let mut symbols_shown = 0;
+    let max_total = 50;
+
+    for kind in &display_order {
+        if symbols_shown >= max_total {
+            break;
+        }
+        let kind_str = kind.to_string();
+        if let Some(entries) = by_kind.get_mut(&kind_str) {
+            entries.sort_by(|a, b| b.2.cmp(&a.2));
+            let count = entries.len();
+            let take = 10.min(max_total - symbols_shown);
+            content.push_str(&format!("**{}** ({}):\n", kind, count));
+            for (name, path, _) in entries.iter().take(take) {
+                content.push_str(&format!("- `{}` ({})\n", name, path));
+                symbols_shown += 1;
+            }
+            content.push('\n');
+        }
+    }
+
+    // Handle any kinds not in display_order
+    for (kind, entries) in &mut by_kind {
+        if symbols_shown >= max_total {
+            break;
+        }
+        if display_order.contains(&kind.as_str()) {
+            continue;
+        }
+        entries.sort_by(|a, b| b.2.cmp(&a.2));
+        let count = entries.len();
+        let take = 10.min(max_total - symbols_shown);
+        content.push_str(&format!("**{}** ({}):\n", kind, count));
+        for (name, path, _) in entries.iter().take(take) {
+            content.push_str(&format!("- `{}` ({})\n", name, path));
+            symbols_shown += 1;
+        }
+        content.push('\n');
+    }
+
+    if content.is_empty() {
+        "No symbols extracted.".to_string()
+    } else {
+        content
+    }
 }
 
 fn build_metrics_section(module: &ModuleDefinition) -> String {

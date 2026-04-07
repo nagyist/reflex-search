@@ -9,9 +9,11 @@ use std::path::PathBuf;
 use tera::Tera;
 
 use crate::cache::CacheManager;
+use crate::semantic::providers::LlmProvider;
 use super::digest;
 use super::diff;
 use super::map::{self, MapFormat, MapZoom};
+use super::narrate;
 use super::snapshot;
 use super::wiki;
 
@@ -55,6 +57,7 @@ pub struct SiteReport {
     pub pages_generated: usize,
     pub digest_generated: bool,
     pub map_generated: bool,
+    pub narration_mode: String,
 }
 
 // Embedded templates
@@ -97,16 +100,55 @@ pub fn generate_site(cache: &CacheManager, config: &SiteConfig) -> Result<SiteRe
         _ => None,
     };
 
+    // Clear LLM cache if force-renarrate is set
+    if config.force_renarrate && !config.no_llm {
+        let llm_cache = super::llm_cache::LlmCache::new(cache.path());
+        if let Err(e) = llm_cache.clear() {
+            log::warn!("Failed to clear LLM cache: {}", e);
+        }
+    }
+
+    // Create LLM provider once for all surfaces
+    let provider: Option<Box<dyn LlmProvider>> = if !config.no_llm {
+        match narrate::create_pulse_provider() {
+            Ok(p) => {
+                eprintln!("LLM provider ready, narration enabled.");
+                Some(p)
+            }
+            Err(e) => {
+                eprintln!("LLM narration unavailable: {}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    let llm_cache = provider.as_ref().map(|_| super::llm_cache::LlmCache::new(cache.path()));
+
     let mut pages_generated = 0;
     let mut digest_generated = false;
     let mut map_generated = false;
+    let mut has_narration = false;
 
     // Generate wiki pages
     if config.surfaces.contains(&Surface::Wiki) {
         let wiki_dir = config.output_dir.join("wiki");
         std::fs::create_dir_all(&wiki_dir)?;
 
-        let wiki_pages = wiki::generate_all_pages(cache, snapshot_diff.as_ref(), config.no_llm)?;
+        let snapshot_id = snapshots.first().map(|s| s.id.as_str()).unwrap_or("unknown");
+        let wiki_pages = wiki::generate_all_pages(
+            cache,
+            snapshot_diff.as_ref(),
+            config.no_llm,
+            snapshot_id,
+            provider.as_ref().map(|p| p.as_ref()),
+            llm_cache.as_ref(),
+        )?;
+
+        if wiki_pages.iter().any(|p| p.sections.summary.is_some()) {
+            has_narration = true;
+        }
 
         for page in &wiki_pages {
             let mut ctx = tera::Context::new();
@@ -141,8 +183,15 @@ pub fn generate_site(cache: &CacheManager, config: &SiteConfig) -> Result<SiteRe
             let digest_data = digest::generate_digest(
                 snapshot_diff.as_ref(),
                 current,
+                Some(cache),
                 config.no_llm,
+                provider.as_ref().map(|p| p.as_ref()),
+                llm_cache.as_ref(),
             )?;
+
+            if digest_data.sections.iter().any(|s| s.narrative.is_some()) {
+                has_narration = true;
+            }
 
             let mut ctx = tera::Context::new();
             ctx.insert("title", "Digest");
@@ -175,10 +224,20 @@ pub fn generate_site(cache: &CacheManager, config: &SiteConfig) -> Result<SiteRe
     // Write CSS
     std::fs::write(config.output_dir.join("style.css"), STYLE_CSS)?;
 
+    // Compute narration mode
+    let narration_mode = if config.no_llm {
+        "disabled".to_string()
+    } else if has_narration {
+        "narrated".to_string()
+    } else {
+        "structural".to_string()
+    };
+
     Ok(SiteReport {
         output_dir: config.output_dir.display().to_string(),
         pages_generated,
         digest_generated,
         map_generated,
+        narration_mode,
     })
 }

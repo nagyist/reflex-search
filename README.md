@@ -23,6 +23,7 @@ Reflex is a code search engine designed for developers and AI coding assistants.
 - **🎨 Regex Support**: Trigram-optimized regex search
 - **🌳 AST Queries**: Structure-aware search with Tree-sitter
 - **🔒 Deterministic**: Same query → same results (no probabilistic ranking)
+- **📊 Pulse**: Auto-generated digest, wiki, and architecture map from structural index data
 
 ## 🚀 Quick Start
 
@@ -74,11 +75,14 @@ Don't want to remember search syntax? Use `rfx ask` to translate natural languag
 
 ### Setup
 
-First-time setup requires configuring an AI provider (OpenAI, Anthropic, or OpenRouter):
+First-time setup requires configuring an AI provider (OpenAI, Anthropic, or OpenRouter). This configuration is shared by `rfx ask` and `rfx pulse`.
 
 ```bash
 # Interactive configuration wizard (recommended)
-rfx ask --configure
+rfx llm config
+
+# Check current configuration
+rfx llm status
 ```
 
 This will guide you through:
@@ -388,6 +392,99 @@ rfx context --framework --entry-points
 
 # Use with semantic queries
 rfx ask "find auth code" --additional-context "$(rfx context --framework)"
+```
+
+### `rfx llm`
+
+Manage LLM provider configuration. This is the central place to set up API keys and model preferences used by both `rfx ask` and `rfx pulse`.
+
+```bash
+rfx llm config                    # Launch interactive setup wizard
+rfx llm status                    # Show current provider, model, and API key status
+```
+
+**Example output of `rfx llm status`:**
+```
+Provider: openrouter
+Model:    meta-llama/llama-4-maverick
+API key:  configured (sk-or-...****)
+```
+
+Configuration is stored in `~/.reflex/config.toml` and applies to all LLM-powered features.
+
+### `rfx pulse`
+
+Generate codebase intelligence surfaces from structural index data. Pulse turns the facts Reflex already extracts (symbols, dependencies, hotspots, file metrics) into browsable documentation.
+
+**Surfaces:**
+- **Digest** - A periodic change report comparing two snapshots, showing file changes, dependency shifts, hotspot movements, and threshold alerts
+- **Wiki** - Per-module documentation pages with structure breakdowns, dependency lists, metrics, and optional LLM-generated summaries
+- **Map** - An architecture diagram exported as Mermaid or D2
+- **Site** - A complete static HTML site combining all three surfaces
+
+**LLM narration** is optional. When an API key is configured (via `rfx llm config`), Pulse uses your LLM provider to generate concise narrative summaries for each section. Without an API key, all output is structural-only. Use `--no-llm` to explicitly skip narration even when a key is available.
+
+LLM responses are cached in `.reflex/pulse/llm-cache/` keyed by structural content hash, so repeated runs with the same data skip the LLM entirely.
+
+**Prerequisites:** Run `rfx index` and `rfx snapshot` before using Pulse. Digests compare two snapshots, so you need at least one snapshot (two for a diff).
+
+```bash
+# Generate a structural-only digest (no LLM required)
+rfx pulse digest --no-llm
+
+# Generate a digest with LLM narration (requires configured API key)
+rfx pulse digest
+
+# Compare specific snapshots
+rfx pulse digest --baseline <ID> --current <ID>
+
+# Output as JSON
+rfx pulse digest --json --pretty
+```
+
+```bash
+# Generate wiki pages for all detected modules
+rfx pulse wiki --no-llm
+
+# Generate wiki with LLM summaries
+rfx pulse wiki
+
+# Write wiki pages to a directory as markdown files
+rfx pulse wiki --output docs/wiki
+
+# Output as JSON
+rfx pulse wiki --json
+```
+
+```bash
+# Export architecture map (Mermaid format, default)
+rfx pulse map
+
+# Export as D2 format
+rfx pulse map --format d2
+
+# Focus on a specific module
+rfx pulse map --zoom src/parsers
+
+# Write to file
+rfx pulse map --output architecture.mmd
+```
+
+```bash
+# Generate a complete static HTML site with all surfaces
+rfx pulse generate --output pulse-site
+
+# Structural-only site (no LLM)
+rfx pulse generate --no-llm
+
+# Select specific surfaces
+rfx pulse generate --include wiki,digest
+
+# Clean output directory before generating
+rfx pulse generate --clean
+
+# Custom title and base URL
+rfx pulse generate --title "My Project" --base-url /docs/
 ```
 
 ### Other Commands

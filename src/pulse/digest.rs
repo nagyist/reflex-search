@@ -4,9 +4,15 @@
 //! When no baseline exists, generates a bootstrap report of current state.
 
 use anyhow::Result;
+use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
+use crate::cache::CacheManager;
+use crate::semantic::providers::LlmProvider;
+
 use super::diff::SnapshotDiff;
+use super::llm_cache::LlmCache;
+use super::narrate;
 use super::snapshot::SnapshotInfo;
 
 /// A complete digest report
@@ -37,10 +43,14 @@ pub struct DigestSection {
 ///
 /// When `diff` is None, produces a bootstrap report from the current snapshot.
 /// When `no_llm` is true, all sections are structural-only.
+/// `provider` and `llm_cache` are created by the caller (site.rs or CLI handler).
 pub fn generate_digest(
     diff: Option<&SnapshotDiff>,
     current_snapshot: &SnapshotInfo,
+    cache: Option<&CacheManager>,
     no_llm: bool,
+    provider: Option<&dyn LlmProvider>,
+    llm_cache: Option<&LlmCache>,
 ) -> Result<Digest> {
     let mut sections = Vec::new();
 
@@ -80,27 +90,87 @@ pub fn generate_digest(
             }
         }
         None => {
-            // Bootstrap mode: report on current state
+            // Bootstrap mode: report on current state with enriched structural data
+            let mut content = format!(
+                "First snapshot — no comparison baseline available.\n\n\
+                 - **Files**: {}\n\
+                 - **Total lines**: {}\n\
+                 - **Dependency edges**: {}\n\
+                 - **Branch**: {}\n\
+                 - **Commit**: {}",
+                current_snapshot.file_count,
+                current_snapshot.total_lines,
+                current_snapshot.edge_count,
+                current_snapshot.git_branch.as_deref().unwrap_or("unknown"),
+                current_snapshot.git_commit.as_deref().map(|c| &c[..8.min(c.len())]).unwrap_or("unknown"),
+            );
+
+            // Enrich with data from cache if available
+            if let Some(cache) = cache {
+                let db_path = cache.path().join("meta.db");
+                if let Ok(conn) = Connection::open(&db_path) {
+                    // Language distribution
+                    if let Ok(lang_dist) = build_language_distribution(&conn) {
+                        if !lang_dist.is_empty() {
+                            content.push_str("\n\n### Language Distribution\n\n");
+                            content.push_str("| Language | Files | Lines |\n|---|---|---|\n");
+                            for (lang, files, lines) in &lang_dist {
+                                content.push_str(&format!("| {} | {} | {} |\n", lang, files, lines));
+                            }
+                        }
+                    }
+
+                    // Top-level directory listing
+                    if let Ok(dirs) = build_directory_overview(&conn) {
+                        if !dirs.is_empty() {
+                            content.push_str("\n### Directory Overview\n\n");
+                            for (dir, count) in &dirs {
+                                content.push_str(&format!("- `{}/` ({} files)\n", dir, count));
+                            }
+                        }
+                    }
+
+                    // Most-imported files (hotspots)
+                    if let Ok(hotspots) = build_hotspots_overview(&conn) {
+                        if !hotspots.is_empty() {
+                            content.push_str("\n### Most-Imported Files\n\n");
+                            for (path, count) in &hotspots {
+                                content.push_str(&format!("- `{}` ({} dependents)\n", path, count));
+                            }
+                        }
+                    }
+                }
+            }
+
             sections.push(DigestSection {
                 heading: "Codebase Overview".to_string(),
-                structural_content: format!(
-                    "First snapshot — no comparison baseline available.\n\n\
-                     - **Files**: {}\n\
-                     - **Total lines**: {}\n\
-                     - **Dependency edges**: {}\n\
-                     - **Branch**: {}\n\
-                     - **Commit**: {}",
-                    current_snapshot.file_count,
-                    current_snapshot.total_lines,
-                    current_snapshot.edge_count,
-                    current_snapshot.git_branch.as_deref().unwrap_or("unknown"),
-                    current_snapshot.git_commit.as_deref().map(|c| &c[..8.min(c.len())]).unwrap_or("unknown"),
-                ),
+                structural_content: content,
                 narrative: None,
                 evidence: vec![],
             });
         }
     }
+
+    // Wire LLM narration when provider is available
+    if !no_llm {
+        if let (Some(provider), Some(llm_cache)) = (provider, llm_cache) {
+            eprintln!("Generating digest narration...");
+            let snapshot_id = &current_snapshot.id;
+
+            for section in &mut sections {
+                section.narrative = narrate::narrate_section(
+                    provider,
+                    narrate::digest_system_prompt(),
+                    &section.structural_content,
+                    llm_cache,
+                    snapshot_id,
+                    &section.heading,
+                );
+            }
+        }
+    }
+
+    let has_any_narrative = sections.iter().any(|s| s.narrative.is_some());
 
     let title = if diff.is_some() {
         "Structural Change Digest".to_string()
@@ -112,7 +182,11 @@ pub fn generate_digest(
         title,
         sections,
         is_bootstrap: diff.is_none(),
-        narration_mode: if no_llm { NarrationMode::Structural } else { NarrationMode::Narrated },
+        narration_mode: if no_llm || !has_any_narrative {
+            NarrationMode::Structural
+        } else {
+            NarrationMode::Narrated
+        },
     })
 }
 
@@ -323,6 +397,74 @@ fn build_module_section(diff: &SnapshotDiff) -> DigestSection {
     }
 }
 
+/// Query language distribution from meta.db: (language, file_count, line_count)
+fn build_language_distribution(conn: &Connection) -> Result<Vec<(String, usize, usize)>> {
+    let mut stmt = conn.prepare(
+        "SELECT COALESCE(language, 'other'), COUNT(*), COALESCE(SUM(line_count), 0)
+         FROM files
+         GROUP BY language
+         ORDER BY COUNT(*) DESC
+         LIMIT 15"
+    )?;
+
+    let rows: Vec<(String, usize, usize)> = stmt.query_map([], |row| {
+        Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+    })?.filter_map(|r| r.ok()).collect();
+
+    Ok(rows)
+}
+
+/// Query top-level directory listing with file counts
+fn build_directory_overview(conn: &Connection) -> Result<Vec<(String, usize)>> {
+    let mut stmt = conn.prepare(
+        "SELECT
+           CASE
+             WHEN INSTR(path, '/') > 0 THEN SUBSTR(path, 1, INSTR(path, '/') - 1)
+             ELSE path
+           END AS dir,
+           COUNT(*) as cnt
+         FROM files
+         GROUP BY dir
+         ORDER BY cnt DESC
+         LIMIT 15"
+    )?;
+
+    let rows: Vec<(String, usize)> = stmt.query_map([], |row| {
+        Ok((row.get(0)?, row.get(1)?))
+    })?.filter_map(|r| r.ok()).collect();
+
+    Ok(rows)
+}
+
+/// Query most-imported files (dependency hotspots)
+fn build_hotspots_overview(conn: &Connection) -> Result<Vec<(String, usize)>> {
+    // Check if file_dependencies table exists
+    let table_exists: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='file_dependencies'",
+        [],
+        |row| row.get(0),
+    )?;
+
+    if !table_exists {
+        return Ok(vec![]);
+    }
+
+    let mut stmt = conn.prepare(
+        "SELECT f.path, COUNT(DISTINCT fd.file_id) as dep_count
+         FROM file_dependencies fd
+         JOIN files f ON fd.resolved_file_id = f.id
+         GROUP BY fd.resolved_file_id
+         ORDER BY dep_count DESC
+         LIMIT 5"
+    )?;
+
+    let rows: Vec<(String, usize)> = stmt.query_map([], |row| {
+        Ok((row.get(0)?, row.get(1)?))
+    })?.filter_map(|r| r.ok()).collect();
+
+    Ok(rows)
+}
+
 fn build_alerts_section(diff: &SnapshotDiff) -> DigestSection {
     let mut content = String::new();
 
@@ -362,7 +504,7 @@ mod tests {
             size_bytes: 1024,
         };
 
-        let digest = generate_digest(None, &snapshot, true).unwrap();
+        let digest = generate_digest(None, &snapshot, None, true, None, None).unwrap();
         assert!(digest.is_bootstrap);
         assert_eq!(digest.sections.len(), 1);
         let md = render_markdown(&digest);

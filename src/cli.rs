@@ -684,6 +684,16 @@ pub enum Command {
         #[command(subcommand)]
         command: PulseSubcommand,
     },
+
+    /// Manage LLM provider configuration (shared by `ask` and `pulse`)
+    ///
+    /// Examples:
+    ///   rfx llm config                       # Launch interactive setup wizard
+    ///   rfx llm status                       # Show current LLM configuration
+    Llm {
+        #[command(subcommand)]
+        command: LlmSubcommand,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -813,6 +823,14 @@ pub enum PulseSubcommand {
         #[arg(long)]
         force_renarrate: bool,
     },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum LlmSubcommand {
+    /// Launch interactive configuration wizard for AI provider and API key
+    Config,
+    /// Show current LLM configuration status
+    Status,
 }
 
 /// Try to run background cache compaction if needed
@@ -1002,6 +1020,12 @@ impl Cli {
                     crate::cli::PulseSubcommand::Generate { output, base_url, title, include, no_llm, clean, force_renarrate } => {
                         handle_pulse_generate(output, base_url, title, include, no_llm, clean, force_renarrate)
                     }
+                }
+            }
+            Some(Command::Llm { command }) => {
+                match command {
+                    crate::cli::LlmSubcommand::Config => handle_llm_config(),
+                    crate::cli::LlmSubcommand::Status => handle_llm_status(),
                 }
             }
         }
@@ -2637,8 +2661,9 @@ fn handle_ask(
     interactive: bool,
     debug: bool,
 ) -> Result<()> {
-    // If --configure flag is set, launch the configuration wizard
+    // If --configure flag is set, launch the configuration wizard (deprecated)
     if configure {
+        eprintln!("Note: --configure is deprecated, use `rfx llm config` instead");
         log::info!("Launching configuration wizard");
         return crate::semantic::run_configure_wizard();
     }
@@ -3787,10 +3812,30 @@ fn handle_pulse_digest(
         }
     };
 
+    // Create provider for standalone digest command
+    let (provider, llm_cache) = if !no_llm {
+        match pulse::narrate::create_pulse_provider() {
+            Ok(p) => {
+                eprintln!("LLM provider ready.");
+                let c = pulse::llm_cache::LlmCache::new(cache.path());
+                (Some(p), Some(c))
+            }
+            Err(e) => {
+                eprintln!("LLM unavailable: {}", e);
+                (None, None)
+            }
+        }
+    } else {
+        (None, None)
+    };
+
     let digest = pulse::digest::generate_digest(
         snapshot_diff.as_ref(),
         current_snapshot,
+        Some(&cache),
         no_llm,
+        provider.as_ref().map(|p| p.as_ref()),
+        llm_cache.as_ref(),
     )?;
 
     if json || pretty {
@@ -3822,7 +3867,32 @@ fn handle_pulse_wiki(no_llm: bool, output: Option<PathBuf>, json: bool) -> Resul
         None
     };
 
-    let pages = pulse::wiki::generate_all_pages(&cache, snapshot_diff.as_ref(), no_llm)?;
+    // Create provider for standalone wiki command
+    let (provider, llm_cache) = if !no_llm {
+        match pulse::narrate::create_pulse_provider() {
+            Ok(p) => {
+                eprintln!("LLM provider ready.");
+                let c = pulse::llm_cache::LlmCache::new(cache.path());
+                (Some(p), Some(c))
+            }
+            Err(e) => {
+                eprintln!("LLM unavailable: {}", e);
+                (None, None)
+            }
+        }
+    } else {
+        (None, None)
+    };
+
+    let snapshot_id = snapshots.first().map(|s| s.id.as_str()).unwrap_or("unknown");
+    let pages = pulse::wiki::generate_all_pages(
+        &cache,
+        snapshot_diff.as_ref(),
+        no_llm,
+        snapshot_id,
+        provider.as_ref().map(|p| p.as_ref()),
+        llm_cache.as_ref(),
+    )?;
 
     if json {
         println!("{}", serde_json::to_string_pretty(&pages)?);
@@ -3915,6 +3985,42 @@ fn handle_pulse_generate(
     eprintln!("  Wiki pages: {}", report.pages_generated);
     eprintln!("  Digest: {}", if report.digest_generated { "yes" } else { "no" });
     eprintln!("  Map: {}", if report.map_generated { "yes" } else { "no" });
+    eprintln!("  Narration: {}", report.narration_mode);
+
+    Ok(())
+}
+
+fn handle_llm_config() -> Result<()> {
+    crate::semantic::run_configure_wizard()
+}
+
+fn handle_llm_status() -> Result<()> {
+    use crate::semantic::config;
+
+    let semantic_config = config::load_config(std::path::Path::new("."))?;
+    let provider = &semantic_config.provider;
+
+    let model = if let Some(ref m) = semantic_config.model {
+        m.clone()
+    } else {
+        config::get_user_model(provider)
+            .unwrap_or_else(|| "(provider default)".to_string())
+    };
+
+    let key_status = match config::get_api_key(provider) {
+        Ok(key) => {
+            if key.len() > 8 {
+                format!("configured ({}...****)", &key[..8])
+            } else {
+                "configured".to_string()
+            }
+        }
+        Err(_) => "not configured".to_string(),
+    };
+
+    println!("Provider: {}", provider);
+    println!("Model:    {}", model);
+    println!("API key:  {}", key_status);
 
     Ok(())
 }

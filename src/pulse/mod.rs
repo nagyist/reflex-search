@@ -13,5 +13,6 @@ pub mod diff;
 pub mod digest;
 pub mod wiki;
 pub mod llm_cache;
+pub mod narrate;
 pub mod map;
 pub mod site;

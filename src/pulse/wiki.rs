@@ -800,7 +800,7 @@ fn build_key_symbols_section(conn: &Connection, module_path: &str, query_engine:
             if let Some(name) = &sym.symbol {
                 // Skip imports, exports, and unknown kinds
                 match &sym.kind {
-                    SymbolKind::Import | SymbolKind::Export | SymbolKind::Unknown(_) => continue,
+                    SymbolKind::Import | SymbolKind::Export | SymbolKind::Variable | SymbolKind::Unknown(_) => continue,
                     _ => {}
                 }
 

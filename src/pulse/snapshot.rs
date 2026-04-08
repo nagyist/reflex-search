@@ -36,6 +36,9 @@ pub struct SnapshotInfo {
     pub edge_count: usize,
     /// Database file size in bytes
     pub size_bytes: u64,
+    /// blake3 hash of all (path, content_hash) pairs — used for change detection
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_fingerprint: Option<String>,
 }
 
 /// Report from garbage collection
@@ -48,9 +51,78 @@ pub struct GcReport {
     pub space_freed_bytes: u64,
 }
 
+/// Result of ensuring a snapshot exists
+#[derive(Debug)]
+pub enum EnsureSnapshotResult {
+    /// A new snapshot was created because the index changed (or no snapshot existed)
+    Created(SnapshotInfo),
+    /// The latest snapshot's fingerprint matches the current index
+    Reused(SnapshotInfo),
+}
+
 /// Get the snapshots directory for a cache
 pub fn get_snapshots_dir(cache: &CacheManager) -> PathBuf {
     cache.path().join("snapshots")
+}
+
+/// Compute a deterministic fingerprint of the current index state.
+///
+/// Hashes all (path, content_hash) pairs from meta.db's files + file_branches
+/// tables, sorted by path. The streaming blake3 hasher avoids allocating all
+/// pairs in memory.
+pub fn compute_index_fingerprint(cache: &CacheManager) -> Result<String> {
+    let meta_db_path = cache.path().join("meta.db");
+    if !meta_db_path.exists() {
+        anyhow::bail!("No index found. Run `rfx index` first.");
+    }
+
+    let conn = Connection::open(&meta_db_path)
+        .context("Failed to open meta.db for fingerprint")?;
+
+    let mut stmt = conn.prepare(
+        "SELECT f.path, fb.hash
+         FROM files f
+         JOIN file_branches fb ON f.id = fb.file_id
+         ORDER BY f.path"
+    )?;
+
+    let mut hasher = blake3::Hasher::new();
+    let mut rows = stmt.query([])?;
+    while let Some(row) = rows.next()? {
+        let path: String = row.get(0)?;
+        let hash: String = row.get(1)?;
+        hasher.update(path.as_bytes());
+        hasher.update(b":");
+        hasher.update(hash.as_bytes());
+        hasher.update(b"\n");
+    }
+
+    Ok(hasher.finalize().to_hex().to_string())
+}
+
+/// Ensure a current snapshot exists.
+///
+/// Creates a new snapshot if:
+/// - No snapshots exist yet
+/// - The latest snapshot's fingerprint doesn't match the current index
+///
+/// Runs GC after creating a new snapshot.
+pub fn ensure_snapshot(
+    cache: &CacheManager,
+    retention: &super::config::RetentionConfig,
+) -> Result<EnsureSnapshotResult> {
+    let current_fingerprint = compute_index_fingerprint(cache)?;
+    let snapshots = list_snapshots(cache)?;
+
+    if let Some(latest) = snapshots.first() {
+        if latest.content_fingerprint.as_deref() == Some(&current_fingerprint) {
+            return Ok(EnsureSnapshotResult::Reused(latest.clone()));
+        }
+    }
+
+    let info = create_snapshot(cache)?;
+    run_gc(cache, retention)?;
+    Ok(EnsureSnapshotResult::Created(info))
 }
 
 /// Create a snapshot of the current index state
@@ -194,6 +266,13 @@ pub fn create_snapshot(cache: &CacheManager) -> Result<SnapshotInfo> {
         )?;
     }
 
+    // Store content fingerprint for change detection
+    let fingerprint = compute_index_fingerprint(cache)?;
+    conn.execute(
+        "INSERT INTO metadata (key, value) VALUES ('content_fingerprint', ?1)",
+        [&fingerprint],
+    )?;
+
     // Gather stats for the returned info
     let file_count: usize = conn.query_row(
         "SELECT COUNT(*) FROM files", [], |row| row.get(0)
@@ -223,6 +302,7 @@ pub fn create_snapshot(cache: &CacheManager) -> Result<SnapshotInfo> {
         total_lines,
         edge_count,
         size_bytes,
+        content_fingerprint: Some(fingerprint),
     })
 }
 
@@ -390,6 +470,7 @@ fn read_snapshot_info(path: &Path) -> Result<SnapshotInfo> {
     let git_branch = get_meta("git_branch");
     let git_commit = get_meta("git_commit");
     let reflex_version = get_meta("reflex_version").unwrap_or_else(|| "unknown".to_string());
+    let content_fingerprint = get_meta("content_fingerprint");
 
     // Gather stats
     let file_count: usize = conn.query_row(
@@ -417,6 +498,7 @@ fn read_snapshot_info(path: &Path) -> Result<SnapshotInfo> {
         total_lines,
         edge_count,
         size_bytes,
+        content_fingerprint,
     })
 }
 
@@ -472,6 +554,7 @@ mod tests {
             total_lines: 10000,
             edge_count: 50,
             size_bytes: 1024,
+            content_fingerprint: None,
         };
         let json = serde_json::to_string(&info).unwrap();
         assert!(json.contains("20260407_120000"));

@@ -564,6 +564,7 @@ mod tests {
             total_lines: 10000,
             edge_count: 50,
             size_bytes: 1024,
+            content_fingerprint: None,
         };
 
         let digest = generate_digest(None, &snapshot, None, true, None, None).unwrap();

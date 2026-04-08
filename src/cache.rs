@@ -760,6 +760,25 @@ provider = "openrouter"  # Options: openai, anthropic, openrouter
         Ok(())
     }
 
+    /// Check if the stored schema hash matches the current binary's hash.
+    /// Returns Ok(true) if they match, Ok(false) if they don't, Err on DB errors.
+    pub fn check_schema_hash(&self) -> Result<bool> {
+        let db_path = self.cache_path.join(META_DB);
+        if !db_path.exists() {
+            return Ok(false);
+        }
+        let conn = Connection::open(&db_path)?;
+        let current = env!("CACHE_SCHEMA_HASH");
+        let stored: Option<String> = conn
+            .query_row(
+                "SELECT value FROM statistics WHERE key = 'schema_hash'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(stored.as_deref() == Some(current))
+    }
+
     /// Update cache schema hash in statistics table
     ///
     /// This should be called after every index operation to ensure the cache

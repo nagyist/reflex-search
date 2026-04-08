@@ -34,15 +34,15 @@ You may ONLY describe facts present in the STRUCTURAL CONTEXT below.
 CRITICAL RULES:
 - NEVER start with 'The X module consists of...', 'This module contains...', or any variant.
 - Your first sentence MUST state what the module DOES or what PURPOSE it serves — infer this from file names, symbol names, and its dependency position.
-- Identify key abstractions: main structs/classes, core functions, public API surface.
+- Focus on PURPOSE, RESPONSIBILITIES, and ARCHITECTURAL ROLE — not on listing individual files or classes.
 - Describe the module's architectural role: Is it a hub (many dependents)? A leaf (few dependents)? A bridge between subsystems?
 - Explain how this module fits into the larger system — what it provides to modules that depend on it, and what it consumes from its own dependencies.
 - If the module has high fan-in (many dependents), note that changes to it have wide blast radius.
 - If the module has significantly more or fewer files/lines than average for the codebase, note that.
 - Note complexity: file count, line count, symbol density.
-- Reference specific file and function names.
+- Do NOT enumerate specific file names, class names, or function names unless they represent a truly central abstraction that defines the module's identity (e.g., a primary entry point or the single core type). When in doubt, describe WHAT it does rather than naming the file that does it.
 - Vary your sentence structure. Do NOT repeat patterns across modules.
-- Write 4-8 sentences. Be specific, not generic. Every sentence should contain at least one concrete name or number.
+- Write 4-8 sentences. Be specific about what the module does and its scale, not about which files it contains.
 - Do NOT speculate about design intent or add information not in the context.
 - NEVER leave missing spaces between words. Proofread your output.
 

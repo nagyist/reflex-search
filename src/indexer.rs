@@ -224,12 +224,14 @@ impl Indexer {
             }
 
             if !any_changed {
-                // Validate that binary index files actually exist and contain data.
-                // A prior interrupted run may have written hashes to the database
-                // but failed to finalize content.bin/trigrams.bin.
                 let content_path = self.cache.path().join("content.bin");
                 let trigrams_path = self.cache.path().join("trigrams.bin");
-                if content_path.exists() && trigrams_path.exists() {
+
+                // Check if schema hash matches - if not, we need a full rebuild
+                // even though file contents haven't changed (binary format may differ)
+                let schema_ok = self.cache.check_schema_hash().unwrap_or(false);
+
+                if schema_ok && content_path.exists() && trigrams_path.exists() {
                     if let Ok(reader) = ContentReader::open(&content_path) {
                         if reader.file_count() > 0 {
                             log::info!("No files changed - skipping index rebuild");
@@ -237,6 +239,8 @@ impl Indexer {
                         }
                     }
                     log::warn!("content.bin invalid despite hashes matching - forcing rebuild");
+                } else if !schema_ok {
+                    log::info!("Schema hash changed - forcing full rebuild");
                 } else {
                     log::warn!("Binary index files missing - forcing rebuild");
                 }

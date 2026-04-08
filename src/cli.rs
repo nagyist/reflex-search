@@ -3815,8 +3815,20 @@ fn handle_pulse_digest(
         anyhow::bail!("No .reflex cache found. Run `rfx index` first.");
     }
 
-    let snapshots = pulse::snapshot::list_snapshots(&cache)?;
     let pulse_config = pulse::config::load_pulse_config(cache.path())?;
+
+    // Auto-snapshot if index has changed since last snapshot
+    let ensure_result = pulse::snapshot::ensure_snapshot(&cache, &pulse_config.retention)?;
+    match &ensure_result {
+        pulse::snapshot::EnsureSnapshotResult::Created(info) => {
+            eprintln!("Auto-snapshot created: {} ({} files)", info.id, info.file_count);
+        }
+        pulse::snapshot::EnsureSnapshotResult::Reused(info) => {
+            eprintln!("Using snapshot: {} (index unchanged)", info.id);
+        }
+    }
+
+    let snapshots = pulse::snapshot::list_snapshots(&cache)?;
 
     let current_snapshot = match &current {
         Some(id) => snapshots.iter().find(|s| s.id == *id)
@@ -3884,8 +3896,20 @@ fn handle_pulse_wiki(no_llm: bool, output: Option<PathBuf>, json: bool) -> Resul
         anyhow::bail!("No .reflex cache found. Run `rfx index` first.");
     }
 
-    let snapshots = pulse::snapshot::list_snapshots(&cache)?;
     let pulse_config = pulse::config::load_pulse_config(cache.path())?;
+
+    // Auto-snapshot if index has changed since last snapshot
+    let ensure_result = pulse::snapshot::ensure_snapshot(&cache, &pulse_config.retention)?;
+    match &ensure_result {
+        pulse::snapshot::EnsureSnapshotResult::Created(info) => {
+            eprintln!("Auto-snapshot created: {} ({} files)", info.id, info.file_count);
+        }
+        pulse::snapshot::EnsureSnapshotResult::Reused(info) => {
+            eprintln!("Using snapshot: {} (index unchanged)", info.id);
+        }
+    }
+
+    let snapshots = pulse::snapshot::list_snapshots(&cache)?;
 
     let snapshot_diff = if snapshots.len() >= 2 {
         pulse::diff::compute_diff(&snapshots[1].path, &snapshots[0].path, &pulse_config.thresholds).ok()

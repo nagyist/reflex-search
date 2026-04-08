@@ -76,6 +76,18 @@ pub struct SiteReport {
 
 /// Generate the complete Zola project and optionally build it
 pub fn generate_site(cache: &CacheManager, config: &SiteConfig) -> Result<SiteReport> {
+    // Auto-snapshot if index has changed since last snapshot
+    let pulse_config = super::config::load_pulse_config(cache.path())?;
+    let ensure_result = snapshot::ensure_snapshot(cache, &pulse_config.retention)?;
+    match &ensure_result {
+        snapshot::EnsureSnapshotResult::Created(info) => {
+            eprintln!("Auto-snapshot created: {} ({} files)", info.id, info.file_count);
+        }
+        snapshot::EnsureSnapshotResult::Reused(info) => {
+            eprintln!("Using snapshot: {} (index unchanged)", info.id);
+        }
+    }
+
     // Clean output dir if requested
     if config.clean && config.output_dir.exists() {
         std::fs::remove_dir_all(&config.output_dir)

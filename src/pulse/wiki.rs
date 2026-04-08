@@ -55,6 +55,10 @@ pub struct WikiSections {
 }
 
 /// Detect modules in the codebase using CodebaseContext
+///
+/// Returns both top-level directories (Tier 1) and their immediate
+/// sub-directories with 3+ files (Tier 2). This produces granular modules
+/// like `src/parsers`, `src/semantic`, `src/pulse` instead of just `src`.
 pub fn detect_modules(cache: &CacheManager) -> Result<Vec<ModuleDefinition>> {
     let context = CodebaseContext::extract(cache)
         .context("Failed to extract codebase context")?;
@@ -72,15 +76,29 @@ pub fn detect_modules(cache: &CacheManager) -> Result<Vec<ModuleDefinition>> {
         }
     }
 
-    // Tier 2: common paths (depth 2-3)
-    for path in &context.common_paths {
-        let path_str = path.trim_end_matches('/');
-        // Skip if already covered by a Tier 1 module
-        let already_covered = modules.iter().any(|m| path_str.starts_with(&m.path));
-        if !already_covered {
-            if let Some(module) = build_module_def(&conn, path_str, 2)? {
+    // Tier 2: discover sub-modules under each Tier 1 module
+    let tier1_paths: Vec<String> = modules.iter().map(|m| m.path.clone()).collect();
+    for parent in &tier1_paths {
+        let sub_modules = discover_sub_modules(&conn, parent)?;
+        for sub_path in sub_modules {
+            // Skip exact duplicates
+            if modules.iter().any(|m| m.path == sub_path) {
+                continue;
+            }
+            if let Some(module) = build_module_def(&conn, &sub_path, 2)? {
                 modules.push(module);
             }
+        }
+    }
+
+    // Also include common_paths that aren't covered by an exact match
+    for path in &context.common_paths {
+        let path_str = path.trim_end_matches('/');
+        if modules.iter().any(|m| m.path == path_str) {
+            continue;
+        }
+        if let Some(module) = build_module_def(&conn, path_str, 2)? {
+            modules.push(module);
         }
     }
 
@@ -90,10 +108,39 @@ pub fn detect_modules(cache: &CacheManager) -> Result<Vec<ModuleDefinition>> {
     Ok(modules)
 }
 
+/// Discover immediate child directories under a parent module that have 3+ files.
+///
+/// Queries meta.db for files under `parent_path/` and groups them by their
+/// immediate subdirectory. Returns paths like `src/parsers`, `src/semantic`.
+fn discover_sub_modules(conn: &Connection, parent_path: &str) -> Result<Vec<String>> {
+    let pattern = format!("{}/%", parent_path);
+    let prefix_len = parent_path.len() + 1; // +1 for the '/'
+
+    let mut stmt = conn.prepare(
+        "SELECT
+            SUBSTR(path, 1, ?2 + INSTR(SUBSTR(path, ?2 + 1), '/') - 1) AS sub_dir,
+            COUNT(*) AS file_count
+         FROM files
+         WHERE path LIKE ?1
+           AND INSTR(SUBSTR(path, ?2 + 1), '/') > 0
+         GROUP BY sub_dir
+         HAVING file_count >= 3
+         ORDER BY file_count DESC"
+    )?;
+
+    let rows: Vec<String> = stmt.query_map(
+        rusqlite::params![pattern, prefix_len],
+        |row| row.get(0),
+    )?.filter_map(|r| r.ok()).collect();
+
+    Ok(rows)
+}
+
 /// Generate a wiki page for a single module
 pub fn generate_wiki_page(
     cache: &CacheManager,
     module: &ModuleDefinition,
+    all_modules: &[ModuleDefinition],
     diff: Option<&super::diff::SnapshotDiff>,
     no_llm: bool,
     provider: Option<&dyn LlmProvider>,
@@ -104,12 +151,18 @@ pub fn generate_wiki_page(
     let conn = Connection::open(&db_path)?;
     let deps_index = DependencyIndex::new(cache.clone());
 
+    // Find child modules of this module
+    let prefix = format!("{}/", module.path);
+    let child_modules: Vec<&ModuleDefinition> = all_modules.iter()
+        .filter(|m| m.path.starts_with(&prefix) && m.path != module.path)
+        .collect();
+
     // Build structural sections
-    let structure = build_structure_section(&conn, &module.path)?;
-    let dependencies = build_dependencies_section(&conn, &module.path)?;
-    let dependents = build_dependents_section(&conn, &deps_index, &module.path)?;
+    let structure = build_structure_section(&conn, &module.path, &child_modules)?;
+    let dependencies = build_dependencies_section(&conn, &module.path, all_modules)?;
+    let dependents = build_dependents_section(&conn, &deps_index, &module.path, all_modules)?;
     let key_symbols = build_key_symbols_section(&conn, &module.path);
-    let metrics = build_metrics_section(module);
+    let metrics = build_metrics_section(module, &conn)?;
     let recent_changes = diff.map(|d| build_recent_changes(d, &module.path));
 
     // Generate LLM summary when provider is available
@@ -176,6 +229,7 @@ pub fn generate_all_pages(
         match generate_wiki_page(
             cache,
             module,
+            &modules,
             diff,
             no_llm,
             provider,
@@ -271,22 +325,62 @@ fn build_module_def(conn: &Connection, path: &str, tier: u8) -> Result<Option<Mo
     }))
 }
 
-fn build_structure_section(conn: &Connection, module_path: &str) -> Result<String> {
+fn build_structure_section(
+    conn: &Connection,
+    module_path: &str,
+    child_modules: &[&ModuleDefinition],
+) -> Result<String> {
     let pattern = format!("{}/%", module_path);
+
+    let mut content = String::new();
+
+    // Show sub-modules if this module has children
+    if !child_modules.is_empty() {
+        content.push_str("### Sub-modules\n\n");
+        for child in child_modules {
+            let short_name = child.path.strip_prefix(module_path)
+                .unwrap_or(&child.path)
+                .trim_start_matches('/');
+            content.push_str(&format!(
+                "- **{}/** — {} files, {} lines ({})\n",
+                short_name,
+                child.file_count,
+                child.total_lines,
+                child.languages.join(", "),
+            ));
+        }
+        content.push('\n');
+    }
+
+    // Group files by immediate subdirectory with line counts
+    let prefix_len = module_path.len() + 1;
     let mut stmt = conn.prepare(
         "SELECT path, language, COALESCE(line_count, 0) FROM files
          WHERE path LIKE ?1
-         ORDER BY path
-         LIMIT 50"
+         ORDER BY line_count DESC"
     )?;
 
     let files: Vec<(String, Option<String>, i64)> = stmt.query_map([&pattern], |row| {
         Ok((row.get(0)?, row.get(1)?, row.get(2)?))
     })?.collect::<Result<Vec<_>, _>>()?;
 
-    let mut content = String::new();
+    // Group by immediate subdirectory
+    let mut by_subdir: HashMap<String, (usize, i64)> = HashMap::new(); // subdir -> (file_count, total_lines)
+    let mut direct_files: Vec<(String, i64)> = Vec::new();
 
-    // Group by language
+    for (path, _, lines) in &files {
+        let rel = &path[prefix_len.min(path.len())..];
+        if let Some(slash_pos) = rel.find('/') {
+            let subdir = &rel[..slash_pos];
+            let entry = by_subdir.entry(subdir.to_string()).or_insert((0, 0));
+            entry.0 += 1;
+            entry.1 += lines;
+        } else {
+            direct_files.push((path.clone(), *lines));
+        }
+    }
+
+    // Language distribution
     let mut by_lang: HashMap<String, usize> = HashMap::new();
     for (_, lang, _) in &files {
         let lang = lang.as_deref().unwrap_or("other");
@@ -300,22 +394,41 @@ fn build_structure_section(conn: &Connection, module_path: &str) -> Result<Strin
         content.push_str(&format!("| {} | {} |\n", lang, count));
     }
 
-    content.push_str("\n**Files:**\n");
-    for (path, _, lines) in files.iter().take(30) {
-        content.push_str(&format!("- `{}` ({} lines)\n", path, lines));
+    // Subdirectory breakdown
+    if !by_subdir.is_empty() {
+        let mut subdirs: Vec<_> = by_subdir.into_iter().collect();
+        subdirs.sort_by(|a, b| b.1.1.cmp(&a.1.1)); // sort by lines desc
+
+        content.push_str("\n### Directories\n\n");
+        content.push_str("| Directory | Files | Lines |\n|---|---|---|\n");
+        for (subdir, (count, lines)) in subdirs.iter().take(20) {
+            content.push_str(&format!("| {}/ | {} | {} |\n", subdir, count, lines));
+        }
     }
-    let total: usize = conn.query_row(
-        "SELECT COUNT(*) FROM files WHERE path LIKE ?1",
-        [&pattern], |row| row.get(0)
-    )?;
-    if total > 30 {
-        content.push_str(&format!("- ... and {} more files\n", total - 30));
+
+    // Top 10 largest files
+    content.push_str("\n### Largest Files\n\n");
+    let all_sorted: Vec<_> = files.iter()
+        .map(|(path, _, lines)| (path.as_str(), *lines))
+        .collect();
+    for (path, lines) in all_sorted.iter().take(10) {
+        let short = path.strip_prefix(&format!("{}/", module_path)).unwrap_or(path);
+        content.push_str(&format!("- `{}` ({} lines)\n", short, lines));
+    }
+
+    let total = files.len();
+    if total > 10 {
+        content.push_str(&format!("- ... and {} more files\n", total - 10));
     }
 
     Ok(content)
 }
 
-fn build_dependencies_section(conn: &Connection, module_path: &str) -> Result<String> {
+fn build_dependencies_section(
+    conn: &Connection,
+    module_path: &str,
+    all_modules: &[ModuleDefinition],
+) -> Result<String> {
     let pattern = format!("{}/%", module_path);
     let mut stmt = conn.prepare(
         "SELECT DISTINCT f2.path
@@ -323,8 +436,7 @@ fn build_dependencies_section(conn: &Connection, module_path: &str) -> Result<St
          JOIN files f1 ON fd.file_id = f1.id
          JOIN files f2 ON fd.resolved_file_id = f2.id
          WHERE f1.path LIKE ?1 AND f2.path NOT LIKE ?1
-         ORDER BY f2.path
-         LIMIT 30"
+         ORDER BY f2.path"
     )?;
 
     let deps: Vec<String> = stmt.query_map([&pattern], |row| row.get(0))?
@@ -334,14 +446,45 @@ fn build_dependencies_section(conn: &Connection, module_path: &str) -> Result<St
         return Ok("No outgoing dependencies detected.".to_string());
     }
 
-    let mut content = String::new();
+    // Group deps by target module
+    let mut by_module: HashMap<String, Vec<String>> = HashMap::new();
     for dep in &deps {
-        content.push_str(&format!("- `{}`\n", dep));
+        let target_module = find_owning_module(dep, all_modules);
+        by_module.entry(target_module).or_default().push(dep.clone());
     }
+
+    let mut groups: Vec<_> = by_module.into_iter().collect();
+    groups.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+
+    let total_files = deps.len();
+    let total_modules = groups.len();
+
+    let mut content = format!(
+        "Depends on **{} files** across **{} modules**.\n\n",
+        total_files, total_modules
+    );
+
+    for (module, files) in &groups {
+        content.push_str(&format!("**{}/** ({} files):\n", module, files.len()));
+        for f in files.iter().take(5) {
+            let short = f.rsplit('/').next().unwrap_or(f);
+            content.push_str(&format!("- `{}`\n", short));
+        }
+        if files.len() > 5 {
+            content.push_str(&format!("- ... and {} more\n", files.len() - 5));
+        }
+        content.push('\n');
+    }
+
     Ok(content)
 }
 
-fn build_dependents_section(conn: &Connection, _deps_index: &DependencyIndex, module_path: &str) -> Result<String> {
+fn build_dependents_section(
+    conn: &Connection,
+    _deps_index: &DependencyIndex,
+    module_path: &str,
+    all_modules: &[ModuleDefinition],
+) -> Result<String> {
     let pattern = format!("{}/%", module_path);
     let mut stmt = conn.prepare(
         "SELECT DISTINCT f1.path
@@ -349,8 +492,7 @@ fn build_dependents_section(conn: &Connection, _deps_index: &DependencyIndex, mo
          JOIN files f1 ON fd.file_id = f1.id
          JOIN files f2 ON fd.resolved_file_id = f2.id
          WHERE f2.path LIKE ?1 AND f1.path NOT LIKE ?1
-         ORDER BY f1.path
-         LIMIT 30"
+         ORDER BY f1.path"
     )?;
 
     let dependents: Vec<String> = stmt.query_map([&pattern], |row| row.get(0))?
@@ -360,10 +502,36 @@ fn build_dependents_section(conn: &Connection, _deps_index: &DependencyIndex, mo
         return Ok("No incoming dependencies detected.".to_string());
     }
 
-    let mut content = String::new();
+    // Group by source module
+    let mut by_module: HashMap<String, Vec<String>> = HashMap::new();
     for dep in &dependents {
-        content.push_str(&format!("- `{}`\n", dep));
+        let source_module = find_owning_module(dep, all_modules);
+        by_module.entry(source_module).or_default().push(dep.clone());
     }
+
+    let mut groups: Vec<_> = by_module.into_iter().collect();
+    groups.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+
+    let total_files = dependents.len();
+    let total_modules = groups.len();
+
+    let mut content = format!(
+        "Used by **{} files** across **{} modules**.\n\n",
+        total_files, total_modules
+    );
+
+    for (module, files) in &groups {
+        content.push_str(&format!("**{}/** ({} files):\n", module, files.len()));
+        for f in files.iter().take(5) {
+            let short = f.rsplit('/').next().unwrap_or(f);
+            content.push_str(&format!("- `{}`\n", short));
+        }
+        if files.len() > 5 {
+            content.push_str(&format!("- ... and {} more\n", files.len() - 5));
+        }
+        content.push('\n');
+    }
+
     Ok(content)
 }
 
@@ -434,14 +602,17 @@ fn build_key_symbols_section(conn: &Connection, module_path: &str) -> String {
         return "No symbols extracted.".to_string();
     }
 
-    // Sort each kind by size (descending) and take top 10
+    let mut content = String::new();
+
+    // --- By Kind view ---
+    content.push_str("### By Kind\n\n");
+
     let display_order = [
         "Function", "Struct", "Class", "Trait", "Interface",
         "Enum", "Method", "Constant", "Type", "Macro",
         "Variable", "Module", "Namespace", "Property", "Attribute",
     ];
 
-    let mut content = String::new();
     let mut symbols_shown = 0;
     let max_total = 50;
 
@@ -456,7 +627,8 @@ fn build_key_symbols_section(conn: &Connection, module_path: &str) -> String {
             let take = 10.min(max_total - symbols_shown);
             content.push_str(&format!("**{}** ({}):\n", kind, count));
             for (name, path, _) in entries.iter().take(take) {
-                content.push_str(&format!("- `{}` ({})\n", name, path));
+                let short = path.rsplit('/').next().unwrap_or(path);
+                content.push_str(&format!("- `{}` ({})\n", name, short));
                 symbols_shown += 1;
             }
             content.push('\n');
@@ -476,10 +648,33 @@ fn build_key_symbols_section(conn: &Connection, module_path: &str) -> String {
         let take = 10.min(max_total - symbols_shown);
         content.push_str(&format!("**{}** ({}):\n", kind, count));
         for (name, path, _) in entries.iter().take(take) {
-            content.push_str(&format!("- `{}` ({})\n", name, path));
+            let short = path.rsplit('/').next().unwrap_or(path);
+            content.push_str(&format!("- `{}` ({})\n", name, short));
             symbols_shown += 1;
         }
         content.push('\n');
+    }
+
+    // --- By File view ---
+    // Collect all symbols grouped by file
+    let mut by_file: HashMap<String, Vec<(String, String)>> = HashMap::new(); // path -> [(name, kind)]
+    for (kind_str, entries) in &by_kind {
+        for (name, path, _) in entries {
+            by_file.entry(path.clone()).or_default()
+                .push((name.clone(), kind_str.clone()));
+        }
+    }
+
+    if !by_file.is_empty() {
+        let mut file_list: Vec<_> = by_file.into_iter().collect();
+        file_list.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+
+        content.push_str("### By File\n\n");
+        for (path, symbols) in file_list.iter().take(10) {
+            let short = path.rsplit('/').next().unwrap_or(path);
+            let kinds: Vec<_> = symbols.iter().map(|(n, k)| format!("{} ({})", n, k)).collect();
+            content.push_str(&format!("**{}**: {}\n\n", short, kinds.join(", ")));
+        }
     }
 
     if content.is_empty() {
@@ -489,18 +684,76 @@ fn build_key_symbols_section(conn: &Connection, module_path: &str) -> String {
     }
 }
 
-fn build_metrics_section(module: &ModuleDefinition) -> String {
-    format!(
+fn build_metrics_section(module: &ModuleDefinition, conn: &Connection) -> Result<String> {
+    let pattern = format!("{}/%", module.path);
+
+    // Average lines per file
+    let avg_lines = if module.file_count > 0 {
+        module.total_lines / module.file_count
+    } else {
+        0
+    };
+
+    // Outgoing dependency count
+    let outgoing: usize = conn.query_row(
+        "SELECT COUNT(DISTINCT fd.resolved_file_id)
+         FROM file_dependencies fd
+         JOIN files f1 ON fd.file_id = f1.id
+         JOIN files f2 ON fd.resolved_file_id = f2.id
+         WHERE f1.path LIKE ?1 AND f2.path NOT LIKE ?1",
+        [&pattern],
+        |row| row.get(0),
+    ).unwrap_or(0);
+
+    // Incoming dependency count
+    let incoming: usize = conn.query_row(
+        "SELECT COUNT(DISTINCT fd.file_id)
+         FROM file_dependencies fd
+         JOIN files f1 ON fd.file_id = f1.id
+         JOIN files f2 ON fd.resolved_file_id = f2.id
+         WHERE f2.path LIKE ?1 AND f1.path NOT LIKE ?1",
+        [&pattern],
+        |row| row.get(0),
+    ).unwrap_or(0);
+
+    Ok(format!(
         "| Metric | Value |\n|---|---|\n\
          | Files | {} |\n\
          | Total lines | {} |\n\
+         | Avg lines/file | {} |\n\
          | Languages | {} |\n\
+         | Outgoing deps | {} |\n\
+         | Incoming deps | {} |\n\
          | Tier | {} |",
         module.file_count,
         module.total_lines,
+        avg_lines,
         module.languages.join(", "),
+        outgoing,
+        incoming,
         module.tier,
-    )
+    ))
+}
+
+/// Find the most-specific module that owns a given file path
+fn find_owning_module(file_path: &str, modules: &[ModuleDefinition]) -> String {
+    let mut best_match = String::new();
+    let mut best_len = 0;
+
+    for module in modules {
+        let prefix = format!("{}/", module.path);
+        if file_path.starts_with(&prefix) && module.path.len() > best_len {
+            best_match = module.path.clone();
+            best_len = module.path.len();
+        }
+    }
+
+    if best_match.is_empty() {
+        // Fall back to top-level directory
+        file_path.split('/').next().unwrap_or("root").to_string()
+    } else {
+        best_match
+    }
 }
 
 fn build_recent_changes(diff: &super::diff::SnapshotDiff, module_path: &str) -> String {

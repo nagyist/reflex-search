@@ -16,3 +16,4 @@ pub mod llm_cache;
 pub mod narrate;
 pub mod map;
 pub mod site;
+pub mod zola;

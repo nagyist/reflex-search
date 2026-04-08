@@ -1,15 +1,17 @@
 //! Architecture map generation
 //!
 //! Produces dependency diagrams in mermaid or d2 format.
-//! Supports repo-level (modules as nodes) and module-level (files as nodes) zoom.
+//! Uses detect_modules() for consistent sub-module resolution across all Pulse surfaces.
 
 use anyhow::Result;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::cache::CacheManager;
 use crate::dependency::DependencyIndex;
+
+use super::wiki;
 
 /// Zoom level for the architecture map
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,46 +56,42 @@ fn generate_repo_map(cache: &CacheManager, format: MapFormat) -> Result<String> 
     let db_path = cache.path().join("meta.db");
     let conn = Connection::open(&db_path)?;
 
-    // Get module-to-module edges by aggregating file-level deps
+    // Use detect_modules() for consistent sub-module resolution
+    let modules = wiki::detect_modules(cache)?;
+
+    // Build module info for node labels
+    let module_info: Vec<(String, usize)> = modules.iter()
+        .map(|m| (m.path.clone(), m.file_count))
+        .collect();
+
+    // Get all file-level dependency edges
     let mut stmt = conn.prepare(
-        "SELECT
-            CASE WHEN INSTR(f1.path, '/') > 0
-                 THEN SUBSTR(f1.path, 1, INSTR(f1.path, '/') - 1)
-                 ELSE '.'
-            END AS source_module,
-            CASE WHEN INSTR(f2.path, '/') > 0
-                 THEN SUBSTR(f2.path, 1, INSTR(f2.path, '/') - 1)
-                 ELSE '.'
-            END AS target_module,
-            COUNT(*) AS edge_count
+        "SELECT f1.path, f2.path
          FROM file_dependencies fd
          JOIN files f1 ON fd.file_id = f1.id
          JOIN files f2 ON fd.resolved_file_id = f2.id
-         WHERE fd.resolved_file_id IS NOT NULL
-         GROUP BY source_module, target_module
-         HAVING source_module != target_module
-         ORDER BY edge_count DESC"
+         WHERE fd.resolved_file_id IS NOT NULL"
     )?;
 
-    let edges: Vec<(String, String, usize)> = stmt.query_map([], |row| {
-        Ok((row.get(0)?, row.get(1)?, row.get::<_, i64>(2)? as usize))
+    let file_edges: Vec<(String, String)> = stmt.query_map([], |row| {
+        Ok((row.get(0)?, row.get(1)?))
     })?.collect::<Result<Vec<_>, _>>()?;
 
-    // Get module file counts for node labels
-    let mut stmt = conn.prepare(
-        "SELECT
-            CASE WHEN INSTR(path, '/') > 0
-                 THEN SUBSTR(path, 1, INSTR(path, '/') - 1)
-                 ELSE '.'
-            END AS module,
-            COUNT(*) AS file_count
-         FROM files
-         GROUP BY module
-         ORDER BY file_count DESC"
-    )?;
-    let modules: Vec<(String, usize)> = stmt.query_map([], |row| {
-        Ok((row.get(0)?, row.get::<_, i64>(1)? as usize))
-    })?.collect::<Result<Vec<_>, _>>()?;
+    // Aggregate file-level edges to module-level edges
+    let mut module_edges: HashMap<(String, String), usize> = HashMap::new();
+    for (src_file, tgt_file) in &file_edges {
+        let src_module = find_owning_module(src_file, &modules);
+        let tgt_module = find_owning_module(tgt_file, &modules);
+
+        if src_module != tgt_module {
+            *module_edges.entry((src_module, tgt_module)).or_insert(0) += 1;
+        }
+    }
+
+    let mut edges: Vec<(String, String, usize)> = module_edges.into_iter()
+        .map(|((s, t), c)| (s, t, c))
+        .collect();
+    edges.sort_by(|a, b| b.2.cmp(&a.2));
 
     // Get hotspots for highlighting
     let deps_index = DependencyIndex::new(cache.clone());
@@ -102,13 +100,33 @@ fn generate_repo_map(cache: &CacheManager, format: MapFormat) -> Result<String> 
         .filter_map(|(id, _)| {
             deps_index.get_file_paths(&[*id]).ok()
                 .and_then(|paths| paths.get(id).cloned())
-                .and_then(|p| p.split('/').next().map(|s| s.to_string()))
+                .map(|p| find_owning_module(&p, &modules))
         })
         .collect();
 
     match format {
-        MapFormat::Mermaid => render_mermaid_repo(&modules, &edges, &hotspot_modules),
-        MapFormat::D2 => render_d2_repo(&modules, &edges, &hotspot_modules),
+        MapFormat::Mermaid => render_mermaid_repo(&module_info, &edges, &hotspot_modules),
+        MapFormat::D2 => render_d2_repo(&module_info, &edges, &hotspot_modules),
+    }
+}
+
+/// Find the most-specific module that owns a given file path
+fn find_owning_module(file_path: &str, modules: &[wiki::ModuleDefinition]) -> String {
+    let mut best_match = String::new();
+    let mut best_len = 0;
+
+    for module in modules {
+        let prefix = format!("{}/", module.path);
+        if file_path.starts_with(&prefix) && module.path.len() > best_len {
+            best_match = module.path.clone();
+            best_len = module.path.len();
+        }
+    }
+
+    if best_match.is_empty() {
+        file_path.split('/').next().unwrap_or("root").to_string()
+    } else {
+        best_match
     }
 }
 
@@ -124,8 +142,6 @@ fn generate_module_map(cache: &CacheManager, module_path: &str, format: MapForma
     let files: Vec<(i64, String)> = stmt.query_map([&pattern], |row| {
         Ok((row.get(0)?, row.get(1)?))
     })?.collect::<Result<Vec<_>, _>>()?;
-
-    let _file_ids: HashSet<i64> = files.iter().map(|(id, _)| *id).collect();
 
     // Get intra-module edges
     let mut stmt = conn.prepare(
@@ -291,5 +307,29 @@ mod tests {
         let result = render_d2_repo(&modules, &edges, &hotspots).unwrap();
         assert!(result.contains("src:"));
         assert!(result.contains("#ff6b6b"));
+    }
+
+    #[test]
+    fn test_find_owning_module() {
+        let modules = vec![
+            wiki::ModuleDefinition {
+                path: "src".to_string(),
+                tier: 1,
+                file_count: 80,
+                total_lines: 50000,
+                languages: vec!["Rust".to_string()],
+            },
+            wiki::ModuleDefinition {
+                path: "src/parsers".to_string(),
+                tier: 2,
+                file_count: 15,
+                total_lines: 8000,
+                languages: vec!["Rust".to_string()],
+            },
+        ];
+
+        assert_eq!(find_owning_module("src/parsers/rust.rs", &modules), "src/parsers");
+        assert_eq!(find_owning_module("src/main.rs", &modules), "src");
+        assert_eq!(find_owning_module("tests/integration.rs", &modules), "tests");
     }
 }

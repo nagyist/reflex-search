@@ -674,12 +674,13 @@ pub enum Command {
     /// Generate codebase intelligence surfaces (digest, wiki, map, site)
     ///
     /// Pulse turns structural facts from the index into browsable documentation.
+    /// The `generate` command creates a Zola project and builds it into a static HTML site.
     ///
     /// Examples:
     ///   rfx pulse digest --no-llm           # Structural-only digest
     ///   rfx pulse wiki --no-llm             # Generate wiki pages
     ///   rfx pulse map                        # Architecture map (mermaid)
-    ///   rfx pulse generate --no-llm          # Full static site
+    ///   rfx pulse generate --no-llm          # Full static site (Zola)
     Pulse {
         #[command(subcommand)]
         command: PulseSubcommand,
@@ -793,13 +794,17 @@ pub enum PulseSubcommand {
         zoom: Option<String>,
     },
 
-    /// Generate a complete static HTML site
+    /// Generate a complete static site (Zola project + HTML build)
+    ///
+    /// Creates a Zola project with markdown content, templates, and CSS,
+    /// then downloads Zola and builds it into a static HTML site.
+    /// The --base-url maps to Zola's base_url config.
     Generate {
-        /// Output directory
+        /// Output directory for the Zola project
         #[arg(short, long, default_value = "pulse-site")]
         output: PathBuf,
 
-        /// Base URL for asset paths
+        /// Base URL for the site (maps to Zola's base_url)
         #[arg(long, default_value = "/")]
         base_url: String,
 
@@ -822,6 +827,24 @@ pub enum PulseSubcommand {
         /// Force re-narration (ignore LLM cache)
         #[arg(long)]
         force_renarrate: bool,
+    },
+
+    /// Serve the generated site locally
+    ///
+    /// Starts a local development server for the Pulse site.
+    /// Uses Zola's built-in server with live reload.
+    Serve {
+        /// Directory containing the generated Zola project
+        #[arg(short, long, default_value = "pulse-site")]
+        output: PathBuf,
+
+        /// Port to serve on
+        #[arg(short, long, default_value = "1111")]
+        port: u16,
+
+        /// Open browser automatically
+        #[arg(long, default_value = "true")]
+        open: bool,
     },
 }
 
@@ -1019,6 +1042,9 @@ impl Cli {
                     }
                     crate::cli::PulseSubcommand::Generate { output, base_url, title, include, no_llm, clean, force_renarrate } => {
                         handle_pulse_generate(output, base_url, title, include, no_llm, clean, force_renarrate)
+                    }
+                    crate::cli::PulseSubcommand::Serve { output, port, open } => {
+                        handle_pulse_serve(output, port, open)
                     }
                 }
             }
@@ -3981,13 +4007,70 @@ fn handle_pulse_generate(
 
     let report = pulse::site::generate_site(&cache, &config)?;
 
-    eprintln!("Site generated in {}/", report.output_dir);
+    eprintln!("Zola project generated in {}/", report.output_dir);
     eprintln!("  Wiki pages: {}", report.pages_generated);
     eprintln!("  Digest: {}", if report.digest_generated { "yes" } else { "no" });
     eprintln!("  Map: {}", if report.map_generated { "yes" } else { "no" });
     eprintln!("  Narration: {}", report.narration_mode);
+    if report.build_success {
+        eprintln!("  Build: success (HTML in {}/public/)", report.output_dir);
+    } else {
+        eprintln!("  Build: skipped (run `cd {} && zola build` manually)", report.output_dir);
+    }
 
     Ok(())
+}
+
+fn handle_pulse_serve(output: PathBuf, port: u16, open: bool) -> Result<()> {
+    // Verify the output dir has a config.toml (i.e., was generated)
+    if !output.join("config.toml").exists() {
+        anyhow::bail!(
+            "No Zola project found at '{}'. Run `rfx pulse generate` first.",
+            output.display()
+        );
+    }
+
+    let zola_path = pulse::zola::ensure_zola()?;
+
+    let url = format!("http://127.0.0.1:{}", port);
+    eprintln!("Serving Pulse site at {}", url);
+    eprintln!("Press Ctrl+C to stop.\n");
+
+    if open {
+        open_browser(&url);
+    }
+
+    let status = std::process::Command::new(&zola_path)
+        .current_dir(&output)
+        .arg("serve")
+        .arg("--port")
+        .arg(port.to_string())
+        .arg("--interface")
+        .arg("127.0.0.1")
+        .status()
+        .context("Failed to start Zola server")?;
+
+    if !status.success() {
+        anyhow::bail!("Zola server exited with error");
+    }
+
+    Ok(())
+}
+
+fn open_browser(url: &str) {
+    let result = if cfg!(target_os = "macos") {
+        std::process::Command::new("open").arg(url).spawn()
+    } else if cfg!(target_os = "windows") {
+        std::process::Command::new("cmd")
+            .args(["/c", "start", url])
+            .spawn()
+    } else {
+        std::process::Command::new("xdg-open").arg(url).spawn()
+    };
+
+    if let Err(e) = result {
+        eprintln!("Could not open browser: {e}");
+    }
 }
 
 fn handle_llm_config() -> Result<()> {

@@ -93,11 +93,12 @@ pub fn generate_digest(
             // Bootstrap mode: report on current state with enriched structural data
             let mut content = format!(
                 "First snapshot — no comparison baseline available.\n\n\
-                 - **Files**: {}\n\
-                 - **Total lines**: {}\n\
-                 - **Dependency edges**: {}\n\
-                 - **Branch**: {}\n\
-                 - **Commit**: {}",
+                 | Metric | Value |\n|---|---|\n\
+                 | Files | {} |\n\
+                 | Total lines | {} |\n\
+                 | Dependency edges | {} |\n\
+                 | Branch | {} |\n\
+                 | Commit | {} |",
                 current_snapshot.file_count,
                 current_snapshot.total_lines,
                 current_snapshot.edge_count,
@@ -109,10 +110,34 @@ pub fn generate_digest(
             if let Some(cache) = cache {
                 let db_path = cache.path().join("meta.db");
                 if let Ok(conn) = Connection::open(&db_path) {
+                    // Module-level summary using detect_modules
+                    if let Ok(modules) = super::wiki::detect_modules(cache) {
+                        if !modules.is_empty() {
+                            let tier1: Vec<_> = modules.iter().filter(|m| m.tier == 1).collect();
+                            let tier2: Vec<_> = modules.iter().filter(|m| m.tier == 2).collect();
+
+                            content.push_str(&format!(
+                                "\n\n### Module Summary\n\n\
+                                 **{} top-level modules**, **{} sub-modules** detected.\n\n",
+                                tier1.len(), tier2.len()
+                            ));
+
+                            content.push_str("| Module | Files | Lines | Languages |\n|---|---|---|---|\n");
+                            for m in &modules {
+                                let indent = if m.tier == 2 { "  " } else { "" };
+                                content.push_str(&format!(
+                                    "| {}{} | {} | {} | {} |\n",
+                                    indent, m.path, m.file_count, m.total_lines,
+                                    m.languages.join(", ")
+                                ));
+                            }
+                        }
+                    }
+
                     // Language distribution
                     if let Ok(lang_dist) = build_language_distribution(&conn) {
                         if !lang_dist.is_empty() {
-                            content.push_str("\n\n### Language Distribution\n\n");
+                            content.push_str("\n### Language Distribution\n\n");
                             content.push_str("| Language | Files | Lines |\n|---|---|---|\n");
                             for (lang, files, lines) in &lang_dist {
                                 content.push_str(&format!("| {} | {} | {} |\n", lang, files, lines));
@@ -120,22 +145,36 @@ pub fn generate_digest(
                         }
                     }
 
-                    // Top-level directory listing
-                    if let Ok(dirs) = build_directory_overview(&conn) {
-                        if !dirs.is_empty() {
-                            content.push_str("\n### Directory Overview\n\n");
-                            for (dir, count) in &dirs {
-                                content.push_str(&format!("- `{}/` ({} files)\n", dir, count));
+                    // Dependency health: cycles and hotspots
+                    if let Ok(hotspots) = build_hotspots_overview(&conn) {
+                        if !hotspots.is_empty() {
+                            content.push_str("\n### Dependency Hotspots\n\n");
+                            content.push_str("Files with most incoming dependencies:\n\n");
+                            for (path, count) in &hotspots {
+                                content.push_str(&format!("- `{}` ({} dependents)\n", path, count));
                             }
                         }
                     }
 
-                    // Most-imported files (hotspots)
-                    if let Ok(hotspots) = build_hotspots_overview(&conn) {
-                        if !hotspots.is_empty() {
-                            content.push_str("\n### Most-Imported Files\n\n");
-                            for (path, count) in &hotspots {
-                                content.push_str(&format!("- `{}` ({} dependents)\n", path, count));
+                    // Check for circular dependencies
+                    if let Ok(cycle_count) = build_cycle_count(&conn) {
+                        if cycle_count > 0 {
+                            content.push_str(&format!(
+                                "\n### Dependency Health\n\n\
+                                 **{} circular dependencies** detected. Run `rfx analyze --circular` for details.\n",
+                                cycle_count
+                            ));
+                        } else {
+                            content.push_str("\n### Dependency Health\n\nNo circular dependencies detected.\n");
+                        }
+                    }
+
+                    // Largest files
+                    if let Ok(largest) = build_largest_files(&conn) {
+                        if !largest.is_empty() {
+                            content.push_str("\n### Largest Files\n\n");
+                            for (path, lines) in &largest {
+                                content.push_str(&format!("- `{}` ({} lines)\n", path, lines));
                             }
                         }
                     }
@@ -414,28 +453,6 @@ fn build_language_distribution(conn: &Connection) -> Result<Vec<(String, usize, 
     Ok(rows)
 }
 
-/// Query top-level directory listing with file counts
-fn build_directory_overview(conn: &Connection) -> Result<Vec<(String, usize)>> {
-    let mut stmt = conn.prepare(
-        "SELECT
-           CASE
-             WHEN INSTR(path, '/') > 0 THEN SUBSTR(path, 1, INSTR(path, '/') - 1)
-             ELSE path
-           END AS dir,
-           COUNT(*) as cnt
-         FROM files
-         GROUP BY dir
-         ORDER BY cnt DESC
-         LIMIT 15"
-    )?;
-
-    let rows: Vec<(String, usize)> = stmt.query_map([], |row| {
-        Ok((row.get(0)?, row.get(1)?))
-    })?.filter_map(|r| r.ok()).collect();
-
-    Ok(rows)
-}
-
 /// Query most-imported files (dependency hotspots)
 fn build_hotspots_overview(conn: &Connection) -> Result<Vec<(String, usize)>> {
     // Check if file_dependencies table exists
@@ -456,6 +473,53 @@ fn build_hotspots_overview(conn: &Connection) -> Result<Vec<(String, usize)>> {
          GROUP BY fd.resolved_file_id
          ORDER BY dep_count DESC
          LIMIT 5"
+    )?;
+
+    let rows: Vec<(String, usize)> = stmt.query_map([], |row| {
+        Ok((row.get(0)?, row.get(1)?))
+    })?.filter_map(|r| r.ok()).collect();
+
+    Ok(rows)
+}
+
+/// Count circular dependencies (approximation via self-referencing paths)
+fn build_cycle_count(conn: &Connection) -> Result<usize> {
+    // Check if file_dependencies table exists
+    let table_exists: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='file_dependencies'",
+        [],
+        |row| row.get(0),
+    )?;
+
+    if !table_exists {
+        return Ok(0);
+    }
+
+    // Count files that have mutual dependencies (A→B and B→A)
+    let count: usize = conn.query_row(
+        "SELECT COUNT(*) FROM (
+            SELECT DISTINCT fd1.file_id
+            FROM file_dependencies fd1
+            JOIN file_dependencies fd2
+              ON fd1.file_id = fd2.resolved_file_id
+              AND fd1.resolved_file_id = fd2.file_id
+            WHERE fd1.resolved_file_id IS NOT NULL
+              AND fd2.resolved_file_id IS NOT NULL
+         )",
+        [],
+        |row| row.get(0),
+    )?;
+
+    Ok(count)
+}
+
+/// Get the largest files in the codebase
+fn build_largest_files(conn: &Connection) -> Result<Vec<(String, usize)>> {
+    let mut stmt = conn.prepare(
+        "SELECT path, COALESCE(line_count, 0) as lc
+         FROM files
+         ORDER BY lc DESC
+         LIMIT 10"
     )?;
 
     let rows: Vec<(String, usize)> = stmt.query_map([], |row| {

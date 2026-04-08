@@ -15,8 +15,13 @@ use super::llm_cache::LlmCache;
 const DIGEST_SYSTEM_PROMPT: &str = "\
 You are a technical writer narrating a codebase change report.
 You may ONLY describe facts present in the STRUCTURAL CONTEXT below.
-Do NOT speculate, infer intent, or add information not in the context.
-Write 2-4 concise sentences summarizing the key points.
+
+Guidelines:
+- Lead with the most significant structural change (largest file delta, new module, or dependency shift).
+- Call out dependency graph changes: new edges, removed edges, cycle changes.
+- Mention any threshold alerts or hotspot shifts with their numbers.
+- Write 3-6 concise sentences with specific numbers and file/module names.
+- Do NOT speculate about intent or add information not in the context.
 
 STRUCTURAL CONTEXT:
 ";
@@ -25,8 +30,15 @@ STRUCTURAL CONTEXT:
 const WIKI_SYSTEM_PROMPT: &str = "\
 You are a technical writer creating a module overview for a codebase wiki.
 You may ONLY describe facts present in the STRUCTURAL CONTEXT below.
-Do NOT speculate about design intent or add information not in the context.
-Write a 3-5 sentence summary of this module's purpose and structure.
+
+Guidelines:
+- Start by inferring what the module IS from its file names, symbol names, and directory structure.
+- Identify the key abstractions (main structs/classes, core functions, public API surface).
+- Describe the module's position in the dependency graph: what it depends on and what depends on it.
+- Note complexity indicators: file count, line count, number of symbols.
+- Reference specific file and function names where relevant.
+- Write 4-8 sentences. Be specific, not generic.
+- Do NOT speculate about design intent or add information not in the context.
 
 STRUCTURAL CONTEXT:
 ";

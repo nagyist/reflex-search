@@ -17,3 +17,4 @@ pub mod narrate;
 pub mod map;
 pub mod site;
 pub mod zola;
+pub mod pagefind;

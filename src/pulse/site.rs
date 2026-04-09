@@ -19,6 +19,7 @@ use super::narrate;
 use super::snapshot;
 use super::wiki;
 use super::zola;
+use super::pagefind;
 
 /// Truncate a string to at most `max_chars` Unicode characters, appending "..." if truncated.
 fn truncate_str(s: &str, max_chars: usize) -> String {
@@ -433,6 +434,10 @@ pub fn generate_site(cache: &CacheManager, config: &SiteConfig) -> Result<SiteRe
 
     // Try to build with Zola
     let build_success = try_zola_build(&config.output_dir);
+    if build_success {
+        try_pagefind_build(&config.output_dir);
+        copy_pagefind_to_static(&config.output_dir);
+    }
 
     eprintln!("  Total generation: {:.1}s", overall_start.elapsed().as_secs_f64());
 
@@ -509,6 +514,8 @@ fn write_templates(output_dir: &Path) -> Result<()> {
     <title>{% block title %}{{ config.title }}{% endblock title %}</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M4 16 Q8 8 12 16 Q16 24 20 16 Q24 8 28 16' fill='none' stroke='%237aa2f7' stroke-width='3' stroke-linecap='round'/></svg>">
     <link rel="stylesheet" href="{{ get_url(path='style.css') }}">
+    <link rel="stylesheet" href="{{ get_url(path='pagefind/pagefind-component-ui.css') }}">
+    <script src="{{ get_url(path='pagefind/pagefind-component-ui.js') }}" type="module"></script>
 </head>
 <body>
     <button class="mobile-menu-toggle" aria-label="Toggle menu" onclick="document.body.classList.toggle('sidebar-open')">
@@ -518,6 +525,8 @@ fn write_templates(output_dir: &Path) -> Result<()> {
         <nav class="sidebar">
             <div class="sidebar-header">
                 <a href="{{ get_url(path='/') }}"><h2>{{ config.title }}</h2></a>
+                <pagefind-modal-trigger>Search</pagefind-modal-trigger>
+                <pagefind-modal></pagefind-modal>
             </div>
             <ul class="nav-list">
                 <li><a href="{{ get_url(path='/') }}" {% if current_path == "/" %}class="active"{% endif %}>Home</a></li>
@@ -1376,6 +1385,35 @@ details[open] {
 
     .mermaid { padding: 1rem; }
 }
+
+/* ── Pagefind search ────────────────────────── */
+pagefind-modal {
+    --pf-modal-width: 700px;
+    --pf-text: var(--fg);
+    --pf-background: var(--bg-surface);
+    --pf-border: var(--border);
+    --pf-border-radius: 6px;
+    --pf-active: var(--fg-accent);
+    --pf-active-background: var(--bg-hover);
+}
+
+.sidebar-header pagefind-modal-trigger {
+    display: block;
+    margin-top: 0.5rem;
+    padding: 0.35rem 0.75rem;
+    background: var(--bg-hover);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--fg-muted);
+    font-size: 0.8rem;
+    cursor: pointer;
+    text-align: left;
+}
+
+.sidebar-header pagefind-modal-trigger:hover {
+    border-color: var(--fg-accent);
+    color: var(--fg);
+}
 "#;
 
     std::fs::write(output_dir.join("static/style.css"), css)
@@ -1872,12 +1910,13 @@ fn try_zola_build(output_dir: &Path) -> bool {
             eprintln!("Building site with Zola...");
             let public_dir = output_dir.join("public");
 
+            // --output-dir is relative to current_dir, so just use "public"
             let result = std::process::Command::new(&zola_path)
                 .current_dir(output_dir)
                 .arg("build")
                 .arg("--force")
                 .arg("--output-dir")
-                .arg(&public_dir)
+                .arg("public")
                 .output();
 
             match result {
@@ -1908,6 +1947,74 @@ fn try_zola_build(output_dir: &Path) -> bool {
             false
         }
     }
+}
+
+// ── Pagefind build ──────────────────────────────────────────
+
+fn try_pagefind_build(output_dir: &Path) -> bool {
+    match pagefind::ensure_pagefind() {
+        Ok(pagefind_path) => {
+            let public_dir = output_dir.join("public");
+            if !public_dir.exists() {
+                return false;
+            }
+            eprintln!("Building search index with Pagefind...");
+            // Run pagefind from output_dir so --site "public" resolves correctly
+            let result = std::process::Command::new(&pagefind_path)
+                .current_dir(output_dir)
+                .arg("--site")
+                .arg("public")
+                .output();
+            match result {
+                Ok(output) if output.status.success() => {
+                    eprintln!("Search index built.");
+                    true
+                }
+                Ok(output) => {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    eprintln!("Pagefind indexing failed: {}", stderr);
+                    false
+                }
+                Err(e) => {
+                    eprintln!("Failed to run Pagefind: {}", e);
+                    false
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("Could not download Pagefind: {} (search will be unavailable)", e);
+            false
+        }
+    }
+}
+
+/// Copy pagefind output from public/ back to static/ so `zola serve` can find it.
+fn copy_pagefind_to_static(output_dir: &Path) {
+    let src = output_dir.join("public/pagefind");
+    let dst = output_dir.join("static/pagefind");
+    if !src.exists() {
+        return;
+    }
+    // Remove stale copy
+    let _ = std::fs::remove_dir_all(&dst);
+    if let Err(e) = copy_dir_recursive(&src, &dst) {
+        eprintln!("Warning: could not copy pagefind to static/: {e}");
+    }
+}
+
+fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let ty = entry.file_type()?;
+        let dest_path = dst.join(entry.file_name());
+        if ty.is_dir() {
+            copy_dir_recursive(&entry.path(), &dest_path)?;
+        } else {
+            std::fs::copy(entry.path(), &dest_path)?;
+        }
+    }
+    Ok(())
 }
 
 fn count_html_files(dir: &Path) -> usize {

@@ -1,0 +1,79 @@
+name: Pulse
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Only allow one deployment at a time
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+env:
+  REFLEX_AI_API_KEY: ${{ secrets.REFLEX_AI_API_KEY }}
+  REFLEX_PROVIDER: ${{ vars.REFLEX_PROVIDER }}
+  REFLEX_MODEL: ${{ vars.REFLEX_MODEL }}
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: pulse-rust-${{ hashFiles('Cargo.lock') }}
+          restore-keys: pulse-rust-
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Index codebase
+        run: ./target/release/rfx index
+
+      - name: Restore LLM cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .reflex/pulse/llm-cache
+          key: pulse-llm-cache-${{ github.sha }}
+          restore-keys: pulse-llm-cache-
+
+      - name: Generate Pulse site
+        run: ./target/release/rfx pulse generate --base-url "/reflex/" --title "Reflex" --concurrency 4
+
+      - name: Save LLM cache
+        uses: actions/cache/save@v4
+        with:
+          path: .reflex/pulse/llm-cache
+          key: pulse-llm-cache-${{ github.sha }}
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: pulse-site/public
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4

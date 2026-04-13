@@ -90,10 +90,32 @@ impl Default for SemanticConfig {
     }
 }
 
+/// Apply environment variable overrides to a semantic config.
+///
+/// Supports:
+/// - `REFLEX_PROVIDER` — overrides the provider (e.g., "openrouter", "anthropic", "openai")
+/// - `REFLEX_MODEL` — overrides the model
+///
+/// This enables CI/headless usage where there's no ~/.reflex/config.toml.
+fn apply_env_overrides(mut config: SemanticConfig) -> SemanticConfig {
+    if let Ok(provider) = env::var("REFLEX_PROVIDER") {
+        log::debug!("Overriding provider from REFLEX_PROVIDER env var: {}", provider);
+        config.provider = provider;
+    }
+
+    if let Ok(model) = env::var("REFLEX_MODEL") {
+        log::debug!("Overriding model from REFLEX_MODEL env var: {}", model);
+        config.model = Some(model);
+    }
+
+    config
+}
+
 /// Load semantic config from ~/.reflex/config.toml
 ///
 /// Semantic configuration is ALWAYS user-level (not project-level).
 /// Falls back to defaults if file doesn't exist or [semantic] section is missing.
+/// Environment variables `REFLEX_PROVIDER` and `REFLEX_MODEL` override config file values.
 ///
 /// Note: The cache_dir parameter is ignored - kept for API compatibility but will be removed in future.
 pub fn load_config(_cache_dir: &Path) -> Result<SemanticConfig> {
@@ -102,7 +124,7 @@ pub fn load_config(_cache_dir: &Path) -> Result<SemanticConfig> {
         Some(h) => h,
         None => {
             log::debug!("Could not determine home directory, using defaults");
-            return Ok(SemanticConfig::default());
+            return Ok(apply_env_overrides(SemanticConfig::default()));
         }
     };
 
@@ -110,7 +132,7 @@ pub fn load_config(_cache_dir: &Path) -> Result<SemanticConfig> {
 
     if !config_path.exists() {
         log::debug!("No ~/.reflex/config.toml found, using default semantic config");
-        return Ok(SemanticConfig::default());
+        return Ok(apply_env_overrides(SemanticConfig::default()));
     }
 
     let config_str = std::fs::read_to_string(&config_path)
@@ -124,10 +146,10 @@ pub fn load_config(_cache_dir: &Path) -> Result<SemanticConfig> {
         let config: SemanticConfig = semantic_table.clone().try_into()
             .context("Failed to parse [semantic] section in ~/.reflex/config.toml")?;
         log::debug!("Loaded semantic config from ~/.reflex/config.toml: provider={}", config.provider);
-        Ok(config)
+        Ok(apply_env_overrides(config))
     } else {
         log::debug!("No [semantic] section in ~/.reflex/config.toml, using defaults");
-        Ok(SemanticConfig::default())
+        Ok(apply_env_overrides(SemanticConfig::default()))
     }
 }
 
@@ -186,8 +208,9 @@ fn load_user_config() -> Result<Option<UserConfig>> {
 ///
 /// Checks in priority order:
 /// 1. ~/.reflex/config.toml (user config file)
-/// 2. {PROVIDER}_API_KEY environment variable (e.g., OPENAI_API_KEY)
-/// 3. Error if not found
+/// 2. REFLEX_AI_API_KEY environment variable (generic, provider-agnostic)
+/// 3. {PROVIDER}_API_KEY environment variable (e.g., OPENAI_API_KEY)
+/// 4. Error if not found
 pub fn get_api_key(provider: &str) -> Result<String> {
     // First check user config file
     if let Ok(Some(user_config)) = load_user_config() {
@@ -207,7 +230,13 @@ pub fn get_api_key(provider: &str) -> Result<String> {
         }
     }
 
-    // Fall back to environment variables
+    // Check generic REFLEX_AI_API_KEY env var (provider-agnostic, useful for CI)
+    if let Ok(key) = env::var("REFLEX_AI_API_KEY") {
+        log::debug!("Using API key from REFLEX_AI_API_KEY env var for provider '{}'", provider);
+        return Ok(key);
+    }
+
+    // Fall back to provider-specific environment variables
     let env_var = match provider.to_lowercase().as_str() {
         "openai" => "OPENAI_API_KEY",
         "anthropic" => "ANTHROPIC_API_KEY",
@@ -221,10 +250,11 @@ pub fn get_api_key(provider: &str) -> Result<String> {
              \n\
              Either:\n\
              1. Run 'rfx ask --configure' to set up your API key interactively\n\
-             2. Set the {} environment variable manually\n\
+             2. Set REFLEX_AI_API_KEY (works with any provider)\n\
+             3. Set the {} environment variable\n\
              \n\
-             Example: export {}=sk-...",
-            provider, env_var, env_var
+             Example: export REFLEX_AI_API_KEY=sk-...",
+            provider, env_var
         )
     })
 }
@@ -233,7 +263,8 @@ pub fn get_api_key(provider: &str) -> Result<String> {
 ///
 /// Checks in priority order:
 /// 1. ~/.reflex/config.toml (credentials section)
-/// 2. Environment variables (OPENAI_API_KEY, ANTHROPIC_API_KEY, OPENROUTER_API_KEY)
+/// 2. REFLEX_AI_API_KEY environment variable (generic)
+/// 3. Provider-specific environment variables (OPENAI_API_KEY, ANTHROPIC_API_KEY, OPENROUTER_API_KEY)
 ///
 /// Returns true if at least one API key is found for any provider.
 pub fn is_any_api_key_configured() -> bool {
@@ -253,7 +284,13 @@ pub fn is_any_api_key_configured() -> bool {
         }
     }
 
-    // Check environment variables
+    // Check generic REFLEX_AI_API_KEY
+    if env::var("REFLEX_AI_API_KEY").is_ok() {
+        log::debug!("Found REFLEX_AI_API_KEY env var");
+        return true;
+    }
+
+    // Check provider-specific environment variables
     for provider in &providers {
         let env_var = match *provider {
             "openai" => "OPENAI_API_KEY",
@@ -504,5 +541,64 @@ languages = []
         let result = get_api_key("unknown");
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Unknown provider"));
+    }
+
+    #[test]
+    fn test_env_override_provider() {
+        let temp = TempDir::new().unwrap();
+
+        unsafe {
+            env::set_var("HOME", temp.path());
+            env::set_var("REFLEX_PROVIDER", "openrouter");
+        }
+
+        let config = load_config(temp.path()).unwrap();
+
+        unsafe {
+            env::remove_var("REFLEX_PROVIDER");
+            env::remove_var("HOME");
+        }
+
+        assert_eq!(config.provider, "openrouter");
+    }
+
+    #[test]
+    fn test_env_override_model() {
+        let temp = TempDir::new().unwrap();
+
+        unsafe {
+            env::set_var("HOME", temp.path());
+            env::set_var("REFLEX_MODEL", "google/gemini-2.5-flash");
+        }
+
+        let config = load_config(temp.path()).unwrap();
+
+        unsafe {
+            env::remove_var("REFLEX_MODEL");
+            env::remove_var("HOME");
+        }
+
+        assert_eq!(config.model, Some("google/gemini-2.5-flash".to_string()));
+        // Provider should remain the default since we didn't override it
+        assert_eq!(config.provider, "openai");
+    }
+
+    #[test]
+    fn test_get_api_key_generic_env_var() {
+        let temp = TempDir::new().unwrap();
+
+        unsafe {
+            env::set_var("HOME", temp.path());
+            env::remove_var("OPENROUTER_API_KEY");
+            env::set_var("REFLEX_AI_API_KEY", "generic-key-456");
+        }
+
+        let key = get_api_key("openrouter").unwrap();
+        assert_eq!(key, "generic-key-456");
+
+        unsafe {
+            env::remove_var("REFLEX_AI_API_KEY");
+            env::remove_var("HOME");
+        }
     }
 }

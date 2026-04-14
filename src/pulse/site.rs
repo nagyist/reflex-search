@@ -694,6 +694,9 @@ render_emoji = false
 external_links_target_blank = true
 smart_punctuation = true
 
+[slugify]
+paths = "safe"
+
 [extra]
 generated_by = "Reflex Pulse"
 has_onboard = {onboard}

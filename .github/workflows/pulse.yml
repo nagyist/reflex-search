@@ -55,7 +55,7 @@ jobs:
           restore-keys: pulse-llm-cache-
 
       - name: Generate Pulse site
-        run: ./target/release/rfx pulse generate --base-url "/reflex/" --title "Reflex" --concurrency 4
+        run: ./target/release/rfx pulse generate --base-url "https://pulse.rfx-search.dev" --title "Reflex" --concurrency 4
 
       - name: Save LLM cache
         uses: actions/cache/save@v4

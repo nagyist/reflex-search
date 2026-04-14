@@ -602,6 +602,7 @@ pub fn generate_site(cache: &CacheManager, config: &SiteConfig) -> Result<SiteRe
     write_home_page(
         &config.output_dir,
         &config.title,
+        &config.base_url,
         &wiki_page_index,
         changelog_generated,
         map_generated,
@@ -738,7 +739,7 @@ fn write_templates(output_dir: &Path) -> Result<()> {
             <div class="sidebar-header">
                 <a href="{{ get_url(path='/') }}"><h2>{{ config.title }}</h2></a>
                 <pagefind-modal-trigger>Search</pagefind-modal-trigger>
-                <pagefind-modal></pagefind-modal>
+                <pagefind-modal bundle-path="{{ get_url(path='pagefind/') }}"></pagefind-modal>
             </div>
             <ul class="nav-list">
                 <li><a href="{{ get_url(path='/') }}" {% if current_path == "/" %}class="active"{% endif %}>Home</a></li>
@@ -903,13 +904,13 @@ fn write_templates(output_dir: &Path) -> Result<()> {
 {% block title %}{{ page.title }} — {{ config.title }}{% endblock title %}
 {% block content %}
 <nav class="breadcrumbs" aria-label="Breadcrumb">
-    <a href="/">Home</a>
+    <a href="{{ get_url(path='/') }}">Home</a>
     <span class="sep">/</span>
-    <a href="/wiki/">Reference</a>
+    <a href="{{ get_url(path='wiki/') }}">Reference</a>
     {% if page.extra.parent_path is defined %}
     <span class="sep">/</span>
     {% set parent_slug = page.extra.parent_path | replace(from="/", to="-") %}
-    <a href="/wiki/{{ parent_slug }}/">{{ page.extra.parent_path }}/</a>
+    <a href="{{ get_url(path='wiki/' ~ parent_slug ~ '/') }}">{{ page.extra.parent_path }}/</a>
     {% endif %}
     <span class="sep">/</span>
     <span class="current">{{ page.title }}</span>
@@ -1774,6 +1775,7 @@ struct WikiPageMeta {
 fn write_home_page(
     output_dir: &Path,
     title: &str,
+    base_url: &str,
     wiki_pages: &[WikiPageMeta],
     has_changelog: bool,
     has_map: bool,
@@ -1785,6 +1787,17 @@ fn write_home_page(
     onboard_data: Option<&onboard::OnboardData>,
     timeline_data: Option<&git_intel::GitIntel>,
 ) -> Result<()> {
+    // Extract the path component from base_url (e.g., "https://example.com/sub/" -> "/sub/", "/" -> "/")
+    let base_path = if base_url.contains("://") {
+        // Full URL: extract path after host
+        let after_scheme = &base_url[base_url.find("://").unwrap() + 3..];
+        let path = after_scheme.find('/').map_or("/", |i| &after_scheme[i..]);
+        if path.ends_with('/') { path.to_string() } else { format!("{path}/") }
+    } else if base_url.ends_with('/') {
+        base_url.to_string()
+    } else {
+        format!("{base_url}/")
+    };
     let mut content = String::new();
 
     content.push_str("+++\n");
@@ -1846,23 +1859,23 @@ fn write_home_page(
     content.push_str("## Explore\n\n");
     content.push_str("<div class=\"quick-links\">\n");
     if has_onboard {
-        content.push_str("<a href=\"/onboard/\" class=\"quick-link\"><strong>Onboard</strong><br>Getting started guide</a>\n");
+        content.push_str(&format!("<a href=\"{}onboard/\" class=\"quick-link\"><strong>Onboard</strong><br>Getting started guide</a>\n", base_path));
     }
-    content.push_str("<a href=\"/wiki/\" class=\"quick-link\"><strong>Reference</strong><br>Per-module documentation</a>\n");
+    content.push_str(&format!("<a href=\"{}wiki/\" class=\"quick-link\"><strong>Reference</strong><br>Per-module documentation</a>\n", base_path));
     if has_glossary {
-        content.push_str("<a href=\"/glossary/\" class=\"quick-link\"><strong>Glossary</strong><br>Domain concepts &amp; vocabulary</a>\n");
+        content.push_str(&format!("<a href=\"{}glossary/\" class=\"quick-link\"><strong>Glossary</strong><br>Domain concepts &amp; vocabulary</a>\n", base_path));
     }
     if has_changelog {
-        content.push_str("<a href=\"/changelog/\" class=\"quick-link\"><strong>Changelog</strong><br>Recent changes</a>\n");
+        content.push_str(&format!("<a href=\"{}changelog/\" class=\"quick-link\"><strong>Changelog</strong><br>Recent changes</a>\n", base_path));
     }
     if has_timeline {
-        content.push_str("<a href=\"/timeline/\" class=\"quick-link\"><strong>Timeline</strong><br>Development activity</a>\n");
+        content.push_str(&format!("<a href=\"{}timeline/\" class=\"quick-link\"><strong>Timeline</strong><br>Development activity</a>\n", base_path));
     }
     if has_map {
-        content.push_str("<a href=\"/map/\" class=\"quick-link\"><strong>Map</strong><br>Dependency graph</a>\n");
+        content.push_str(&format!("<a href=\"{}map/\" class=\"quick-link\"><strong>Map</strong><br>Dependency graph</a>\n", base_path));
     }
     if has_explorer {
-        content.push_str("<a href=\"/explorer/\" class=\"quick-link\"><strong>Explorer</strong><br>Visual treemap</a>\n");
+        content.push_str(&format!("<a href=\"{}explorer/\" class=\"quick-link\"><strong>Explorer</strong><br>Visual treemap</a>\n", base_path));
     }
     content.push_str("</div>\n\n");
 
@@ -1898,10 +1911,10 @@ fn write_home_page(
             let desc = truncate_str(&page.description, 150);
             content.push_str(&format!(
                 "<div class=\"module-card tier-1-card\">\n\
-                 <h3><a href=\"/wiki/{}/\">{}</a></h3>\n\
+                 <h3><a href=\"{}wiki/{}/\">{}</a></h3>\n\
                  <div class=\"module-stats\">{} files · {} lines</div>\n\
                  <p>{}</p>\n",
-                page.slug, page.title, page.file_count, page.total_lines, desc
+                base_path, page.slug, page.title, page.file_count, page.total_lines, desc
             ));
 
             // Nest Tier 2 children under their Tier 1 parent
@@ -1913,8 +1926,8 @@ fn write_home_page(
                 content.push_str("<ul class=\"sub-modules\">\n");
                 for child in children {
                     content.push_str(&format!(
-                        "<li><a href=\"/wiki/{}/\">{}</a> <span class=\"sub-stats\">({} files)</span></li>\n",
-                        child.slug, child.title, child.file_count
+                        "<li><a href=\"{}wiki/{}/\">{}</a> <span class=\"sub-stats\">({} files)</span></li>\n",
+                        base_path, child.slug, child.title, child.file_count
                     ));
                 }
                 content.push_str("</ul>\n");

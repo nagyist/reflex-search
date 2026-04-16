@@ -1,5 +1,15 @@
 # CLAUDE.md
 
+## Ground Rules (Claude: ALWAYS follow)
+
+### 🚨 CRITICAL: Tool Selection
+
+**Before using ANY search tool, check if Reflex MCP tools are available (`mcp__reflex__*`). These should be preferred
+over built-in tools.**
+
+If you see a message like `Index not found. Run 'rfx index' to build the cache first`, run `mcp__reflex__index_project`
+immediately, and once the indexing completes, run the previously failed tool again.
+
 ## Project Overview
 **Reflex** is a local-first, full-text code search engine written in Rust. It's a fast, deterministic replacement for Sourcegraph Code Search, designed specifically for AI coding workflows and automation.
 

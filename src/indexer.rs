@@ -738,6 +738,19 @@ impl Indexer {
                 }
             }
 
+            // Find and parse all Cargo.toml files for Rust workspace support
+            let rust_crates = crate::parsers::rust::parse_all_rust_crates(root)
+                .unwrap_or_else(|e| {
+                    log::warn!("Failed to parse Cargo.toml files: {}", e);
+                    Vec::new()
+                });
+            if !rust_crates.is_empty() {
+                log::info!("Found {} Rust workspace crates", rust_crates.len());
+                for krate in &rust_crates {
+                    log::debug!("  {} (root: {})", krate.name, krate.root_path.display());
+                }
+            }
+
             // Note: Kotlin projects use the same java_projects above (same build systems: Maven/Gradle)
 
             // Find and parse all composer.json files for PHP projects (monorepo support)
@@ -911,6 +924,17 @@ impl Indexer {
                         }
                     }
 
+                    // Reclassify Rust imports using workspace crates
+                    if file_path.ends_with(".rs") && !rust_crates.is_empty() {
+                        let new_type = crate::parsers::rust::reclassify_rust_import(
+                            &import_info.imported_path,
+                            &rust_crates,
+                        );
+                        if matches!(new_type, ImportType::Internal) {
+                            import_info.import_type = new_type;
+                        }
+                    }
+
                     // ONLY insert Internal dependencies - skip External and Stdlib
                     if !matches!(import_info.import_type, ImportType::Internal) {
                         continue;
@@ -1056,11 +1080,19 @@ impl Indexer {
                         }
                     } else if file_path.ends_with(".rs") {
                         // Resolve Rust dependencies (crate::, super::, self::, mod declarations)
-                        if let Some(resolved_path) = crate::parsers::rust::resolve_rust_use_to_path(
+                        // Falls back to workspace resolution for cross-crate imports
+                        let resolved_path_opt = crate::parsers::rust::resolve_rust_use_to_path(
                             &import_info.imported_path,
                             Some(&file_path),
                             Some(root.to_str().unwrap_or("")),
-                        ) {
+                        ).or_else(|| {
+                            crate::parsers::rust::resolve_rust_workspace_path(
+                                &import_info.imported_path,
+                                &rust_crates,
+                            )
+                        });
+
+                        if let Some(resolved_path) = resolved_path_opt {
                             // Look up file ID in database using exact match
                             match dep_index.get_file_id_by_path(&resolved_path) {
                                 Ok(Some(id)) => {

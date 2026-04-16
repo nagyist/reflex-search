@@ -21,6 +21,9 @@ use crate::symbol_cache::SymbolCache;
 /// Lock file name to prevent concurrent indexing
 const LOCK_FILE: &str = "indexing.lock";
 
+/// Maximum age of a lock file before it's considered stale (1 hour)
+const LOCK_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(3600);
+
 /// Status file name for progress tracking
 const STATUS_FILE: &str = "indexing.status";
 
@@ -59,6 +62,26 @@ pub enum IndexerState {
     Completed,
     /// Indexer failed with error
     Failed,
+}
+
+/// Check if a lock file is stale based on its modification time
+///
+/// A lock file is considered stale if its mtime is older than `LOCK_MAX_AGE`.
+/// This allows recovery from crashed indexer processes that didn't clean up
+/// their lock file (SIGKILL, OOM, power loss, etc.).
+fn is_lock_stale(lock_path: &Path) -> bool {
+    let metadata = match std::fs::metadata(lock_path) {
+        Ok(m) => m,
+        Err(_) => return false, // Can't read => not stale, let caller handle
+    };
+    let modified = match metadata.modified() {
+        Ok(t) => t,
+        Err(_) => return false,
+    };
+    match modified.elapsed() {
+        Ok(age) => age > LOCK_MAX_AGE,
+        Err(_) => false, // Clock skew — don't remove
+    }
 }
 
 /// Background symbol indexer
@@ -101,8 +124,23 @@ impl BackgroundIndexer {
     }
 
     /// Check if an indexing process is already running
+    ///
+    /// If the lock file exists but is older than `LOCK_MAX_AGE`, it's treated
+    /// as stale (left behind by a crashed process) and removed automatically.
     pub fn is_running(cache_dir: &Path) -> bool {
-        cache_dir.join(LOCK_FILE).exists()
+        let lock_path = cache_dir.join(LOCK_FILE);
+        if !lock_path.exists() {
+            return false;
+        }
+        if is_lock_stale(&lock_path) {
+            log::warn!(
+                "Removing stale indexing lock file (older than {:?})",
+                LOCK_MAX_AGE
+            );
+            let _ = std::fs::remove_file(&lock_path);
+            return false;
+        }
+        true
     }
 
     /// Get the current indexing status (if available)
@@ -123,17 +161,27 @@ impl BackgroundIndexer {
     }
 
     /// Acquire lock file (returns error if already locked)
+    ///
+    /// If a stale lock file is detected, it is removed before acquiring.
+    /// This provides defense-in-depth alongside the `is_running()` check.
     fn acquire_lock(&self) -> Result<File> {
         let lock_path = self.cache_path.join(LOCK_FILE);
 
         if lock_path.exists() {
-            anyhow::bail!("Indexing already in progress (lock file exists)");
+            if is_lock_stale(&lock_path) {
+                log::warn!(
+                    "Removing stale indexing lock file (older than {:?})",
+                    LOCK_MAX_AGE
+                );
+                let _ = std::fs::remove_file(&lock_path);
+            } else {
+                anyhow::bail!("Indexing already in progress (lock file exists)");
+            }
         }
 
         let mut lock_file = File::create(&lock_path)
             .context("Failed to create lock file")?;
 
-        // Write PID to lock file for debugging
         let pid = std::process::id();
         writeln!(lock_file, "{}", pid)?;
 
@@ -524,5 +572,80 @@ mod tests {
         assert_eq!(indexer.status.state, IndexerState::Completed);
         assert_eq!(indexer.status.processed_files, 0);
         assert_eq!(indexer.status.total_files, 0);
+    }
+
+    #[test]
+    fn test_stale_lock_detection() {
+        use filetime::{FileTime, set_file_mtime};
+
+        let temp = TempDir::new().unwrap();
+        let cache_mgr = CacheManager::new(temp.path());
+        cache_mgr.init().unwrap();
+
+        let lock_path = cache_mgr.path().join(LOCK_FILE);
+
+        // Fresh lock file should not be considered stale
+        std::fs::write(&lock_path, "12345").unwrap();
+        assert!(!is_lock_stale(&lock_path), "fresh lock should not be stale");
+
+        // Backdate mtime to 2 hours ago (exceeds LOCK_MAX_AGE of 1 hour)
+        let two_hours_ago = std::time::SystemTime::now()
+            - std::time::Duration::from_secs(2 * 3600);
+        set_file_mtime(&lock_path, FileTime::from_system_time(two_hours_ago)).unwrap();
+
+        assert!(is_lock_stale(&lock_path), "2-hour-old lock should be stale");
+
+        // Nonexistent lock file should not be reported as stale
+        std::fs::remove_file(&lock_path).unwrap();
+        assert!(!is_lock_stale(&lock_path), "missing lock should not be stale");
+    }
+
+    #[test]
+    fn test_is_running_cleans_stale_lock() {
+        use filetime::{FileTime, set_file_mtime};
+
+        let temp = TempDir::new().unwrap();
+        let cache_mgr = CacheManager::new(temp.path());
+        cache_mgr.init().unwrap();
+
+        let lock_path = cache_mgr.path().join(LOCK_FILE);
+
+        // Create a stale lock file (backdated 2 hours)
+        std::fs::write(&lock_path, "99999999").unwrap();
+        let two_hours_ago = std::time::SystemTime::now()
+            - std::time::Duration::from_secs(2 * 3600);
+        set_file_mtime(&lock_path, FileTime::from_system_time(two_hours_ago)).unwrap();
+
+        assert!(lock_path.exists(), "lock file should exist before is_running()");
+
+        // is_running() should detect staleness, remove the lock, and return false
+        assert!(!BackgroundIndexer::is_running(cache_mgr.path()));
+        assert!(
+            !lock_path.exists(),
+            "stale lock file should be removed by is_running()"
+        );
+    }
+
+    #[test]
+    fn test_acquire_lock_cleans_stale_lock() {
+        use filetime::{FileTime, set_file_mtime};
+
+        let temp = TempDir::new().unwrap();
+        let cache_mgr = CacheManager::new(temp.path());
+        cache_mgr.init().unwrap();
+
+        let lock_path = cache_mgr.path().join(LOCK_FILE);
+
+        // Create a stale lock file
+        std::fs::write(&lock_path, "99999999").unwrap();
+        let two_hours_ago = std::time::SystemTime::now()
+            - std::time::Duration::from_secs(2 * 3600);
+        set_file_mtime(&lock_path, FileTime::from_system_time(two_hours_ago)).unwrap();
+
+        // acquire_lock() should succeed by treating the stale lock as removable
+        let indexer = BackgroundIndexer::new(temp.path()).unwrap();
+        let _lock = indexer.acquire_lock().expect("stale lock should not block acquire_lock");
+
+        assert!(lock_path.exists(), "new lock file should be created");
     }
 }

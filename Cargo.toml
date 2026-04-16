@@ -1,6 +1,6 @@
 [package]
 name = "reflex-search"
-version = "1.1.1"
+version = "1.1.2"
 edition = "2024"
 authors = ["Reflex Contributors"]
 description = "A local-first, structure-aware code search engine for AI agents"
@@ -121,6 +121,7 @@ blake3 = "1.5"
 
 [dev-dependencies]
 tempfile = "3.12"
+filetime = "0.2"
 
 [[bin]]
 name = "rfx"

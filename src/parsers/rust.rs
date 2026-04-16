@@ -1422,3 +1422,282 @@ mod path_resolution_tests {
         assert!(result.is_none());
     }
 }
+
+// ============================================================================
+// Workspace Support
+// ============================================================================
+
+/// A Rust crate discovered by scanning for Cargo.toml files.
+#[derive(Debug, Clone)]
+pub struct RustCrate {
+    pub name: String,
+    pub root_path: std::path::PathBuf,
+}
+
+/// Find all Rust crates in the workspace by scanning for Cargo.toml files.
+///
+/// Only runs if a root Cargo.toml exists (to avoid wasted work on non-Rust projects).
+/// Uses the `ignore` crate to respect .gitignore patterns.
+pub fn parse_all_rust_crates(root: &std::path::Path) -> anyhow::Result<Vec<RustCrate>> {
+    // Gate: only scan if this looks like a Rust project
+    if !root.join("Cargo.toml").exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut crates = Vec::new();
+    let walker = ignore::WalkBuilder::new(root)
+        .git_ignore(true)
+        .build();
+
+    for entry in walker {
+        let entry = entry?;
+        if entry.file_name() == "Cargo.toml" {
+            let content = std::fs::read_to_string(entry.path())?;
+            if let Some(name) = extract_crate_name(&content) {
+                if let Some(crate_root) = entry.path().parent() {
+                    crates.push(RustCrate {
+                        name,
+                        root_path: crate_root.to_path_buf(),
+                    });
+                }
+            }
+        }
+    }
+    Ok(crates)
+}
+
+/// Extract the package name from a Cargo.toml file using the `toml` crate.
+fn extract_crate_name(content: &str) -> Option<String> {
+    let table: toml::Table = content.parse().ok()?;
+    table
+        .get("package")?
+        .get("name")?
+        .as_str()
+        .map(|s| s.to_string())
+}
+
+/// Reclassify an import based on known workspace crates.
+///
+/// If the import path matches a workspace crate name (e.g., `my_crate` or
+/// `my_crate::module`), reclassify it as Internal. Otherwise, fall back to
+/// the default Rust import classification.
+pub fn reclassify_rust_import(
+    path: &str,
+    crates: &[RustCrate],
+) -> crate::models::ImportType {
+    for krate in crates {
+        if path == krate.name || path.starts_with(&format!("{}::", krate.name)) {
+            return crate::models::ImportType::Internal;
+        }
+    }
+    classify_rust_import(path)
+}
+
+/// Resolve a workspace crate import to a file path.
+///
+/// Handles imports like `my_crate::config` by finding the matching workspace
+/// crate and resolving the module path within its `src/` directory.
+pub fn resolve_rust_workspace_path(
+    import_path: &str,
+    crates: &[RustCrate],
+) -> Option<String> {
+    for krate in crates {
+        if import_path == krate.name || import_path.starts_with(&format!("{}::", krate.name)) {
+            let relative_module = if import_path == krate.name {
+                ""
+            } else {
+                import_path.strip_prefix(&format!("{}::", krate.name)).unwrap_or("")
+            };
+
+            let src_root = krate.root_path.join("src");
+
+            if relative_module.is_empty() {
+                // Bare crate import -> lib.rs or main.rs
+                let lib = src_root.join("lib.rs");
+                if lib.exists() {
+                    return Some(lib.to_string_lossy().to_string());
+                }
+                let main = src_root.join("main.rs");
+                if main.exists() {
+                    return Some(main.to_string_lossy().to_string());
+                }
+            } else {
+                let parts: Vec<&str> = relative_module.split("::").collect();
+
+                // Try resolving as a module file (only accept if the file exists)
+                if let Some(path) = resolve_rust_module_path(&src_root, &parts) {
+                    if std::path::Path::new(&path).exists() {
+                        return Some(path);
+                    }
+                }
+
+                // Try popping the last component (it may be an item like a struct/fn, not a module)
+                if parts.len() > 1 {
+                    if let Some(path) = resolve_rust_module_path(&src_root, &parts[..parts.len() - 1]) {
+                        if std::path::Path::new(&path).exists() {
+                            return Some(path);
+                        }
+                    }
+                }
+
+                // Return the best-guess path even if it doesn't exist
+                // (the indexer will validate against its file database)
+                if let Some(path) = resolve_rust_module_path(&src_root, &parts) {
+                    return Some(path);
+                }
+            }
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod workspace_tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    fn create_workspace(dir: &std::path::Path) {
+        // Root Cargo.toml with workspace
+        fs::write(
+            dir.join("Cargo.toml"),
+            r#"[workspace]
+members = ["crate_a", "crate_b"]
+"#,
+        ).unwrap();
+
+        // crate_a
+        let crate_a = dir.join("crate_a");
+        fs::create_dir_all(crate_a.join("src")).unwrap();
+        fs::write(
+            crate_a.join("Cargo.toml"),
+            r#"[package]
+name = "crate_a"
+version = "0.1.0"
+"#,
+        ).unwrap();
+        fs::write(crate_a.join("src/lib.rs"), "pub mod config;").unwrap();
+        fs::write(crate_a.join("src/config.rs"), "pub struct Config;").unwrap();
+
+        // crate_b with inline table syntax
+        let crate_b = dir.join("crate_b");
+        fs::create_dir_all(crate_b.join("src")).unwrap();
+        fs::write(
+            crate_b.join("Cargo.toml"),
+            r#"[package]
+name = "crate_b" # a comment
+version = "0.1.0"
+"#,
+        ).unwrap();
+        fs::write(crate_b.join("src/lib.rs"), "").unwrap();
+    }
+
+    #[test]
+    fn test_extract_crate_name_standard() {
+        let toml = r#"[package]
+name = "my_crate"
+version = "0.1.0"
+"#;
+        assert_eq!(extract_crate_name(toml), Some("my_crate".to_string()));
+    }
+
+    #[test]
+    fn test_extract_crate_name_inline_table() {
+        // The toml crate handles this correctly
+        let toml = r#"[package]
+name = "inline_crate"
+version = "0.1.0"
+edition = "2021"
+"#;
+        assert_eq!(extract_crate_name(toml), Some("inline_crate".to_string()));
+    }
+
+    #[test]
+    fn test_extract_crate_name_with_comment() {
+        let toml = r#"[package]
+name = "commented_crate" # my crate
+version = "0.1.0"
+"#;
+        assert_eq!(extract_crate_name(toml), Some("commented_crate".to_string()));
+    }
+
+    #[test]
+    fn test_extract_crate_name_no_package() {
+        let toml = r#"[workspace]
+members = ["crate_a"]
+"#;
+        assert_eq!(extract_crate_name(toml), None);
+    }
+
+    #[test]
+    fn test_parse_all_rust_crates() {
+        let dir = TempDir::new().unwrap();
+        create_workspace(dir.path());
+
+        let crates = parse_all_rust_crates(dir.path()).unwrap();
+        assert_eq!(crates.len(), 2);
+
+        let names: Vec<&str> = crates.iter().map(|c| c.name.as_str()).collect();
+        assert!(names.contains(&"crate_a"));
+        assert!(names.contains(&"crate_b"));
+    }
+
+    #[test]
+    fn test_parse_all_rust_crates_non_rust_project() {
+        let dir = TempDir::new().unwrap();
+        // No Cargo.toml -> should return empty
+        let crates = parse_all_rust_crates(dir.path()).unwrap();
+        assert!(crates.is_empty());
+    }
+
+    #[test]
+    fn test_reclassify_rust_import_workspace_crate() {
+        let crates = vec![
+            RustCrate {
+                name: "crate_a".to_string(),
+                root_path: std::path::PathBuf::from("/workspace/crate_a"),
+            },
+        ];
+
+        assert!(matches!(
+            reclassify_rust_import("crate_a", &crates),
+            crate::models::ImportType::Internal
+        ));
+        assert!(matches!(
+            reclassify_rust_import("crate_a::config", &crates),
+            crate::models::ImportType::Internal
+        ));
+        // External crate should stay External
+        assert!(matches!(
+            reclassify_rust_import("serde::Serialize", &crates),
+            crate::models::ImportType::External
+        ));
+    }
+
+    #[test]
+    fn test_resolve_rust_workspace_path() {
+        let dir = TempDir::new().unwrap();
+        create_workspace(dir.path());
+
+        let crates = parse_all_rust_crates(dir.path()).unwrap();
+
+        // Bare crate import -> lib.rs
+        let result = resolve_rust_workspace_path("crate_a", &crates);
+        assert!(result.is_some());
+        assert!(result.unwrap().ends_with("lib.rs"));
+
+        // Module import -> config.rs
+        let result = resolve_rust_workspace_path("crate_a::config", &crates);
+        assert!(result.is_some());
+        assert!(result.unwrap().ends_with("config.rs"));
+
+        // Item import -> resolves to the module file
+        let result = resolve_rust_workspace_path("crate_a::config::Config", &crates);
+        assert!(result.is_some());
+        assert!(result.unwrap().ends_with("config.rs"));
+
+        // Unknown crate -> None
+        let result = resolve_rust_workspace_path("unknown_crate::foo", &crates);
+        assert!(result.is_none());
+    }
+}

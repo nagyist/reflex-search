@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "reflex": {
+      "command": "./node_modules/.bin/rfx",
+      "args": ["mcp"]
+    }
+  }
+}

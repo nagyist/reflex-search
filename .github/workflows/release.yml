@@ -212,8 +212,10 @@ jobs:
             cd "$NPM_PKG_DIR"
             # cargo-dist ships a shrinkwrap baked at its release time; regenerate
             # it against today's registry so transitive CVEs get the fix versions.
-            npm install
-            npm audit fix
+            # --ignore-scripts skips the package's postinstall (which downloads the
+            # rfx binary from a release tag that doesn't exist yet at this stage).
+            npm install --ignore-scripts
+            npm audit fix --ignore-scripts
             # Hard gate: fail the release if anything high/critical remains.
             npm audit --audit-level=high
             cd -

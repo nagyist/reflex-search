@@ -1690,7 +1690,6 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
             let def_response = engine.search_with_metadata(&pattern, def_filter)?;
 
             // Extract first definition as a compact object (reuse MatchResult's Serialize impl)
-            const MAX_PREVIEW_LENGTH: usize = 100;
             let definition: Option<serde_json::Value> = def_response.results.first().and_then(|fg| {
                 fg.matches.first().map(|m| {
                     let mut def_obj = serde_json::to_value(m).unwrap_or(json!({}));
@@ -1698,7 +1697,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                         map.insert("path".to_string(), json!(fg.path.clone()));
                         // Truncate preview if present
                         if let Some(preview) = map.get("preview").and_then(|v| v.as_str()) {
-                            let truncated = crate::cli::truncate_preview(preview, MAX_PREVIEW_LENGTH);
+                            let truncated = crate::cli::truncate_preview(preview, DEFAULT_MCP_PREVIEW_LENGTH);
                             map.insert("preview".to_string(), json!(truncated));
                         }
                     }
@@ -1738,7 +1737,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                         json!({
                             "path": fg.path,
                             "line": m.span.start_line,
-                            "preview": crate::cli::truncate_preview(&m.preview, MAX_PREVIEW_LENGTH)
+                            "preview": crate::cli::truncate_preview(&m.preview, DEFAULT_MCP_PREVIEW_LENGTH)
                         })
                     })
                 })

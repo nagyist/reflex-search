@@ -1157,13 +1157,14 @@ impl TrigramIndex {
         );
 
         Ok(Self {
-            index: Vec::new(),  // Empty in lazy mode
+            index: Vec::new(), // Empty in lazy mode
             files,
             temp_index: None,
-            mmap: Some(mmap),  // Keep mmap alive for lazy decompression!
+            mmap: Some(mmap), // Keep mmap alive for lazy decompression!
             directory,
             partial_indices: Vec::new(),
             temp_dir: None,
+            max_posting_list_entries: 0,
         })
     }
 }

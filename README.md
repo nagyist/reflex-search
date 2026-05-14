@@ -4,7 +4,7 @@
 
 Reflex is a code search engine designed for developers and AI coding assistants. It combines trigram indexing for full-text search with Tree-sitter parsing for symbol extraction and static analysis for dependency tracking. Unlike symbol-only tools, Reflex finds **every occurrence** of patterns, function calls, variable usage, comments, and more with deterministic, repeatable results.
 
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen)]()
+[![CI](https://github.com/reflex-search/reflex/actions/workflows/ci.yml/badge.svg)](https://github.com/reflex-search/reflex/actions/workflows/ci.yml)
 [![Tests](https://img.shields.io/badge/tests-347%20passing-brightgreen)]()
 [![License](https://img.shields.io/badge/license-MIT-blue)]()
 [![gitcgr](https://gitcgr.com/badge/reflex-search/reflex.svg)](https://gitcgr.com/reflex-search/reflex)

@@ -542,7 +542,7 @@ fn initialize_provider(
     let model = config::resolve_model(&semantic_config, config.model_override.as_deref());
 
     // Create provider
-    create_provider(&semantic_config.provider, api_key, model, config::get_provider_options(&semantic_config.provider))
+    create_provider(&semantic_config.provider, api_key, model, config::get_provider_options(&semantic_config.provider), semantic_config.timeout_seconds)
 }
 
 /// Call LLM provider with retry logic (from semantic/mod.rs)

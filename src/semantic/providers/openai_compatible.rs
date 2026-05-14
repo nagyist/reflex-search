@@ -18,7 +18,7 @@ pub struct OpenAiCompatibleProvider {
 }
 
 impl OpenAiCompatibleProvider {
-    pub fn new(api_key: Option<String>, model: String, base_url: String) -> Result<Self> {
+    pub fn new(api_key: Option<String>, model: String, base_url: String, timeout_secs: u64) -> Result<Self> {
         if model.trim().is_empty() {
             anyhow::bail!(
                 "openai-compatible provider requires a model name (no default available for self-hosted endpoints)"
@@ -30,8 +30,12 @@ impl OpenAiCompatibleProvider {
 
         let normalized_base = base_url.trim_end_matches('/').to_string();
 
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(timeout_secs))
+            .build()
+            .context("Failed to build reqwest client")?;
         Ok(Self {
-            client: reqwest::Client::new(),
+            client,
             api_key: api_key.filter(|k| !k.is_empty()),
             model,
             base_url: normalized_base,
@@ -74,7 +78,16 @@ impl LlmProvider for OpenAiCompatibleProvider {
             .json(&request_body)
             .send()
             .await
-            .with_context(|| format!("Failed to send request to OpenAI-compatible endpoint at {}", url))?;
+            .map_err(|e| {
+                if e.is_timeout() {
+                    anyhow::anyhow!(
+                        "OpenAI-compatible request to {} timed out. Set REFLEX_LLM_TIMEOUT_SECONDS to increase the limit.",
+                        url
+                    )
+                } else {
+                    anyhow::anyhow!("Failed to send request to OpenAI-compatible endpoint at {}: {}", url, e)
+                }
+            })?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -121,6 +134,7 @@ mod tests {
             Some("sk-test".to_string()),
             "qwen2.5-coder".to_string(),
             "http://localhost:1234/v1".to_string(),
+            30,
         )
         .unwrap();
         assert_eq!(provider.name(), "openai-compatible");
@@ -135,6 +149,7 @@ mod tests {
             None,
             "llama-3".to_string(),
             "http://localhost:11434/v1".to_string(),
+            30,
         )
         .unwrap();
         assert!(provider.api_key.is_none());
@@ -146,6 +161,7 @@ mod tests {
             Some(String::new()),
             "llama-3".to_string(),
             "http://localhost:11434/v1".to_string(),
+            30,
         )
         .unwrap();
         assert!(provider.api_key.is_none());
@@ -157,6 +173,7 @@ mod tests {
             None,
             "llama-3".to_string(),
             "http://localhost:1234/v1/".to_string(),
+            30,
         )
         .unwrap();
         assert_eq!(provider.base_url, "http://localhost:1234/v1");
@@ -168,6 +185,7 @@ mod tests {
             None,
             String::new(),
             "http://localhost:1234/v1".to_string(),
+            30,
         );
         assert!(result.is_err());
         if let Err(e) = result {
@@ -181,10 +199,43 @@ mod tests {
             None,
             "llama-3".to_string(),
             String::new(),
+            30,
         );
         assert!(result.is_err());
         if let Err(e) = result {
             assert!(e.to_string().contains("base_url"));
         }
+    }
+
+    #[tokio::test]
+    async fn timeout_fires_within_2x_configured_value() {
+        use std::time::Instant;
+        use tokio::io::AsyncReadExt;
+        use tokio::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            loop {
+                if let Ok((mut stream, _)) = listener.accept().await {
+                    tokio::spawn(async move {
+                        let mut buf = [0u8; 1024];
+                        loop { match stream.read(&mut buf).await { Ok(0) | Err(_) => break, Ok(_) => {} } }
+                    });
+                }
+            }
+        });
+
+        let provider = OpenAiCompatibleProvider::new(
+            None, "test-model".to_string(), format!("http://{}", addr), 1,
+        ).unwrap();
+
+        let start = Instant::now();
+        let result = provider.complete("hello", false).await;
+        let elapsed = start.elapsed();
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("timed out"), "expected timed out in error");
+        assert!(elapsed.as_secs() < 2, "timeout too long: {}s", elapsed.as_secs());
     }
 }

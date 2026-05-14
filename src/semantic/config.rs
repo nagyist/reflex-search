@@ -44,6 +44,10 @@ pub struct SemanticConfig {
     /// Evaluation strictness (0.0-1.0, higher is stricter)
     #[serde(default = "default_strictness")]
     pub evaluation_strictness: f32,
+
+    /// LLM request timeout in seconds (default: 30)
+    #[serde(default = "default_timeout_seconds")]
+    pub timeout_seconds: u64,
 }
 
 fn default_enabled() -> bool {
@@ -74,6 +78,10 @@ fn default_strictness() -> f32 {
     0.5
 }
 
+fn default_timeout_seconds() -> u64 {
+    30
+}
+
 impl Default for SemanticConfig {
     fn default() -> Self {
         Self {
@@ -86,6 +94,7 @@ impl Default for SemanticConfig {
             max_tools_per_phase: 5,
             evaluation_enabled: true,
             evaluation_strictness: 0.5,
+            timeout_seconds: 30,
         }
     }
 }
@@ -109,6 +118,16 @@ fn apply_env_overrides(mut config: SemanticConfig) -> SemanticConfig {
         if !model.is_empty() {
             log::debug!("Overriding model from REFLEX_MODEL env var: {}", model);
             config.model = Some(model);
+        }
+    }
+
+    if let Ok(val) = env::var("REFLEX_LLM_TIMEOUT_SECONDS") {
+        match val.trim().parse::<u64>() {
+            Ok(secs) if secs > 0 => {
+                log::debug!("Overriding LLM timeout from REFLEX_LLM_TIMEOUT_SECONDS: {}s", secs);
+                config.timeout_seconds = secs;
+            }
+            _ => log::warn!("REFLEX_LLM_TIMEOUT_SECONDS is invalid (must be a positive integer): {}", val),
         }
     }
 

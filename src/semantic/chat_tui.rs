@@ -1159,7 +1159,7 @@ impl ChatApp {
             config.provider = self.provider_name.clone();
             let api_key = super::config::get_api_key(&config.provider)?;
             let model = super::config::resolve_model(&config, self.model_override.as_deref());
-            super::providers::create_provider(&config.provider, api_key, model, super::config::get_provider_options(&config.provider))?
+            super::providers::create_provider(&config.provider, api_key, model, super::config::get_provider_options(&config.provider), config.timeout_seconds)?
         };
 
         // Build summarization prompt
@@ -1337,7 +1337,7 @@ async fn triage_question(
         config.provider = provider_name.to_string();
         let api_key = super::config::get_api_key(&config.provider)?;
         let model = super::config::resolve_model(&config, model_override);
-        super::providers::create_provider(&config.provider, api_key, model, super::config::get_provider_options(&config.provider))?
+        super::providers::create_provider(&config.provider, api_key, model, super::config::get_provider_options(&config.provider), config.timeout_seconds)?
     };
 
     // Build triage prompt
@@ -1432,7 +1432,7 @@ async fn execute_query_async(
                 config.provider = provider_name.to_string();
                 let api_key = super::config::get_api_key(&config.provider)?;
                 let model = super::config::resolve_model(&config, model_override);
-                super::providers::create_provider(&config.provider, api_key, model, super::config::get_provider_options(&config.provider))
+                super::providers::create_provider(&config.provider, api_key, model, super::config::get_provider_options(&config.provider), config.timeout_seconds)
             })() {
                 Ok(provider) => provider,
                 Err(e) => {
@@ -1527,7 +1527,7 @@ async fn execute_query_async(
                                 config.provider = provider_name.to_string();
                                 let api_key = super::config::get_api_key(&config.provider)?;
                                 let model = super::config::resolve_model(&config, model_override);
-                                super::providers::create_provider(&config.provider, api_key, model, super::config::get_provider_options(&config.provider))
+                                super::providers::create_provider(&config.provider, api_key, model, super::config::get_provider_options(&config.provider), config.timeout_seconds)
                             })() {
                                 Ok(provider) => provider,
                                 Err(e) => {
@@ -1647,7 +1647,7 @@ async fn execute_query_async(
                 config.provider = provider_name.to_string();
                 let api_key = super::config::get_api_key(&config.provider)?;
                 let model = super::config::resolve_model(&config, model_override);
-                super::providers::create_provider(&config.provider, api_key, model, super::config::get_provider_options(&config.provider))
+                super::providers::create_provider(&config.provider, api_key, model, super::config::get_provider_options(&config.provider), config.timeout_seconds)
             })() {
                 Ok(provider) => provider,
                 Err(e) => {

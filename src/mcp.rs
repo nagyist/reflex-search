@@ -1534,14 +1534,19 @@ fn process_request(request: JsonRpcRequest) -> JsonRpcResponse {
         },
         Err(e) => {
             log::error!("MCP error: {}", e);
+            let (kind, message) = if let Some(re) = e.downcast_ref::<crate::errors::ReflexError>() {
+                (re.kind().to_string(), re.to_string())
+            } else {
+                ("IoError".to_string(), e.to_string())
+            };
             JsonRpcResponse {
                 jsonrpc: "2.0".to_string(),
                 id: request.id,
                 result: None,
                 error: Some(JsonRpcError {
                     code: -32603,
-                    message: e.to_string(),
-                    data: None,
+                    message: message.clone(),
+                    data: Some(json!({ "kind": kind, "message": message })),
                 }),
             }
         }

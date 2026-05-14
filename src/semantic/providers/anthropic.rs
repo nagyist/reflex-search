@@ -4,6 +4,7 @@ use super::LlmProvider;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use serde_json::json;
+use std::time::Duration;
 
 /// Anthropic provider for Claude models
 pub struct AnthropicProvider {
@@ -14,9 +15,13 @@ pub struct AnthropicProvider {
 
 impl AnthropicProvider {
     /// Create a new Anthropic provider
-    pub fn new(api_key: String, model: Option<String>) -> Result<Self> {
+    pub fn new(api_key: String, model: Option<String>, timeout_secs: u64) -> Result<Self> {
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(timeout_secs))
+            .build()
+            .context("Failed to build reqwest client")?;
         Ok(Self {
-            client: reqwest::Client::new(),
+            client,
             api_key,
             model: model.unwrap_or_else(|| "claude-3-5-haiku-20241022".to_string()),
         })
@@ -145,7 +150,7 @@ mod tests {
 
     #[test]
     fn test_new_with_default_model() {
-        let provider = AnthropicProvider::new("test-key".to_string(), None).unwrap();
+        let provider = AnthropicProvider::new("test-key".to_string(), None, 300).unwrap();
         assert_eq!(provider.name(), "anthropic");
         assert_eq!(provider.model, "claude-3-5-haiku-20241022");
     }
@@ -154,7 +159,8 @@ mod tests {
     fn test_new_with_custom_model() {
         let provider = AnthropicProvider::new(
             "test-key".to_string(),
-            Some("claude-3-5-sonnet-20241022".to_string())
+            Some("claude-3-5-sonnet-20241022".to_string()),
+            300
         ).unwrap();
         assert_eq!(provider.model, "claude-3-5-sonnet-20241022");
     }

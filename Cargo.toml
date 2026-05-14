@@ -124,6 +124,12 @@ sha2 = "0.10"
 [dev-dependencies]
 tempfile = "3.12"
 filetime = "0.2"
+criterion = { version = "0.5", features = ["html_reports"] }
+insta = "1"
+
+[[bench]]
+name = "trigram_bench"
+harness = false
 
 [[bin]]
 name = "rfx"

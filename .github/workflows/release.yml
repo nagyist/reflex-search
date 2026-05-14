@@ -220,8 +220,11 @@ jobs:
             npm audit --audit-level=high
             cd -
             # Repackage with the refreshed shrinkwrap.
+            # --dereference: npm install creates symlinks in node_modules/.bin/;
+            # the npm registry rejects tarballs containing symlinks, so flatten
+            # them into regular files at pack time.
             TARBALL="target/distrib/reflex-search-npm-package.tar.gz"
-            tar -czf "$TARBALL" -C target/distrib --transform 's|^reflex-search-npm-package|package|' reflex-search-npm-package
+            tar -czhf "$TARBALL" -C target/distrib --transform 's|^reflex-search-npm-package|package|' reflex-search-npm-package
           fi
       - name: "Upload artifacts"
         uses: actions/upload-artifact@v4

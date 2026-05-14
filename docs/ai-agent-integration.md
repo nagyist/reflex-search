@@ -177,3 +177,13 @@ Found 42 results in 5ms:
 ```
 
 This is useful for human operators but not recommended for AI agents.
+
+## MCP Tool Selection
+
+When using Reflex via MCP (Model Context Protocol), use the **[MCP Tool Selection Cheatsheet](./mcp-tool-cheatsheet.md)** to pick the right tool for each task. It organizes all 15 tools into a decision tree by agent intent:
+
+- **Finding locations** → `list_locations`, `count_occurrences`
+- **Finding definitions** → `search_code(symbols: true)`
+- **Understanding a file** → `get_dependencies`, `get_dependents`, `get_transitive_deps`
+- **Codebase overview** → `gather_context`, `analyze_summary`, `find_hotspots`
+- **Complex patterns** → `search_regex`, `search_ast` (last resort)

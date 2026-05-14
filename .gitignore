@@ -1,5 +1,5 @@
 # Rust build artifacts
-/target/
+/target/**
 Cargo.lock
 
 # Binary symlink (convenience link to compiled binary)

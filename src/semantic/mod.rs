@@ -63,6 +63,7 @@ pub async fn ask_question(
         api_key,
         model,
         config::get_provider_options(&config.provider),
+        config.timeout_seconds,
     )?;
 
     log::info!("Using provider: {} (model: {})", provider.name(), provider.default_model());

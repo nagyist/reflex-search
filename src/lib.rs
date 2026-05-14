@@ -28,6 +28,7 @@
 pub mod ast_query;
 pub mod background_indexer;
 pub mod cache;
+pub mod errors;
 pub mod cli;
 pub mod context;
 pub mod content_store;
@@ -54,7 +55,7 @@ pub use cache::CacheManager;
 pub use indexer::Indexer;
 pub use models::{
     Dependency, DependencyInfo, FileGroupedResult, ImportType, IndexConfig, IndexStats, IndexStatus, IndexWarning,
-    IndexWarningDetails, IndexedFile, Language, MatchResult, QueryResponse, SearchResult, Span, SymbolKind,
+    IndexWarningDetails, IndexedFile, Language, MatchResult, QueryResponse, SearchResult, Span, SymbolKind, SymbolRef,
 };
 pub use query::{QueryEngine, QueryFilter};
 pub use watcher::{watch, WatchConfig};

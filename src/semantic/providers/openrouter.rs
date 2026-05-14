@@ -8,6 +8,7 @@ use super::LlmProvider;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use serde_json::json;
+use std::time::Duration;
 
 /// Model info fetched from OpenRouter API
 #[derive(Debug, Clone)]
@@ -100,13 +101,17 @@ impl OpenRouterProvider {
     /// * `api_key` - OpenRouter API key
     /// * `model` - Optional model override (default: anthropic/claude-sonnet-4)
     /// * `sort` - Optional sort strategy: "price", "speed", or "throughput" (default: "price")
-    pub fn new(api_key: String, model: Option<String>, sort: Option<String>) -> Result<Self> {
+    pub fn new(api_key: String, model: Option<String>, sort: Option<String>, timeout_secs: u64) -> Result<Self> {
         // Normalize sort value: map legacy "speed" to the correct API value "latency"
         let sort = sort
             .map(|s| if s == "speed" { "latency".to_string() } else { s })
             .unwrap_or_else(|| "price".to_string());
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(timeout_secs))
+            .build()
+            .context("Failed to build reqwest client")?;
         Ok(Self {
-            client: reqwest::Client::new(),
+            client,
             api_key,
             model: model.unwrap_or_else(|| "anthropic/claude-sonnet-4".to_string()),
             sort,
@@ -148,7 +153,6 @@ impl LlmProvider for OpenRouterProvider {
             .header("HTTP-Referer", "https://github.com/reflex-search/reflex")
             .header("X-Title", "Reflex")
             .json(&request_body)
-            .timeout(std::time::Duration::from_secs(60))
             .send()
             .await
             .map_err(|e| {
@@ -221,7 +225,7 @@ mod tests {
 
     #[test]
     fn test_new_with_defaults() {
-        let provider = OpenRouterProvider::new("test-key".to_string(), None, None).unwrap();
+        let provider = OpenRouterProvider::new("test-key".to_string(), None, None, 30).unwrap();
         assert_eq!(provider.name(), "openrouter");
         assert_eq!(provider.model, "anthropic/claude-sonnet-4");
         assert_eq!(provider.sort, "price");
@@ -233,6 +237,7 @@ mod tests {
             "test-key".to_string(),
             Some("openai/gpt-4o-mini".to_string()),
             Some("latency".to_string()),
+            300,
         )
         .unwrap();
         assert_eq!(provider.model, "openai/gpt-4o-mini");
@@ -245,6 +250,7 @@ mod tests {
             "test-key".to_string(),
             None,
             Some("speed".to_string()),
+            300,
         )
         .unwrap();
         assert_eq!(provider.sort, "latency");

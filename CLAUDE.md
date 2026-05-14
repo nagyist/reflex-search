@@ -289,6 +289,26 @@ Result: **Simpler, faster, smaller cache, more flexible symbol filtering**
     "context_after": ["    symbols.extend(extract_structs(...", ""]
   }
   ```
+- **Language field forward-compatibility**: The `language` field in `SearchResult` serializes as an enum string (e.g. `"Rust"`, `"Python"`). When a file type is unrecognized, the field serializes as `"Unknown"`. Callers **must not** exhaustively match on this field without a fallback — treat `"Unknown"` as the forward-compatible sentinel for any language Reflex does not yet recognise. New languages may be added in minor releases.
+
+---
+
+## Security / Threat Model
+
+### `rfx serve` (HTTP API server)
+
+- **Bind address**: Defaults to `127.0.0.1:7878` — loopback only. The server is intentionally not authenticated; it is designed for local, single-user use.
+- **Risk if exposed**: Passing `--host 0.0.0.0` (or any non-loopback address) exposes the index and all search results to the network without any authentication or rate-limiting. Do not do this on shared or internet-facing machines.
+- **No auth by design**: There are no API keys, tokens, or access controls on `rfx serve`. This is a deliberate local-tool trade-off, not a bug. If you need network-accessible search, add a reverse proxy with authentication in front of it.
+- **CORS**: The server enables permissive CORS headers (`Any` origin) for localhost browser tooling — another reason not to expose it externally.
+
+### Summary
+
+| Concern | Default behaviour | Risk if changed |
+|---------|-------------------|-----------------|
+| Bind address | `127.0.0.1` (loopback) | Network exposure with no auth |
+| Authentication | None | Unauthenticated read access to codebase index |
+| Port | `7878` | Firewall / port conflict only |
 
 ---
 

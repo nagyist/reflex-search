@@ -14,7 +14,6 @@
 //! See `.context/TRIGRAM_RESEARCH.md` for detailed algorithm documentation.
 
 use anyhow::{Context, Result};
-use rkyv::{Archive, Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
@@ -142,7 +141,7 @@ fn decompress_posting_list(
 }
 
 /// Location of a trigram occurrence in the codebase
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Archive, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct FileLocation {
     /// File ID (index into file list)
     pub file_id: u32,
@@ -160,15 +159,6 @@ impl FileLocation {
             byte_offset,
         }
     }
-}
-
-/// Serializable trigram data (for rkyv zero-copy serialization)
-#[derive(Archive, Serialize, Deserialize)]
-struct TrigramData {
-    /// Inverted index: trigram → sorted locations
-    index: Vec<(Trigram, Vec<FileLocation>)>,
-    /// File ID to file path mapping
-    files: Vec<String>,
 }
 
 /// Directory entry for lazy-loaded trigram index
@@ -211,6 +201,9 @@ pub struct TrigramIndex {
     partial_indices: Vec<PathBuf>,
     /// Temporary directory for partial indices
     temp_dir: Option<PathBuf>,
+    /// Cap on posting list size; 0 = unlimited. Enforced at finalize time.
+    /// Bounds query latency for high-frequency trigrams (trigram-density lens).
+    max_posting_list_entries: usize,
 }
 
 impl TrigramIndex {
@@ -224,7 +217,13 @@ impl TrigramIndex {
             directory: Vec::new(),
             partial_indices: Vec::new(),
             temp_dir: None,
+            max_posting_list_entries: 0,
         }
+    }
+
+    /// Set maximum posting list entries per trigram (0 = unlimited).
+    pub fn set_max_posting_list_entries(&mut self, cap: usize) {
+        self.max_posting_list_entries = cap;
     }
 
     /// Enable batch-flush mode for large codebases
@@ -426,10 +425,15 @@ impl TrigramIndex {
             self.index = temp_map.into_iter().collect();
         }
 
-        // Sort and deduplicate posting lists
-        for (_, list) in self.index.iter_mut() {
+        // Sort, deduplicate, and cap posting lists
+        let cap = self.max_posting_list_entries;
+        for (trigram, list) in self.index.iter_mut() {
             list.sort_unstable();
             list.dedup(); // Remove duplicates (same trigram appearing multiple times on same line)
+            if cap > 0 && list.len() > cap {
+                log::warn!("Trigram 0x{:06X} posting list has {} entries (cap {}); truncating.", trigram, list.len(), cap);
+                list.truncate(cap);
+            }
         }
 
         // Sort the index by trigram for binary search
@@ -587,6 +591,12 @@ impl TrigramIndex {
                 merged_locations.sort_unstable();
                 merged_locations.dedup();
 
+                let cap = self.max_posting_list_entries;
+                if cap > 0 && merged_locations.len() > cap {
+                    log::warn!("Trigram 0x{:06X} posting list has {} entries (cap {}); truncating.", trigram, merged_locations.len(), cap);
+                    merged_locations.truncate(cap);
+                }
+
                 // Compress and write this trigram's posting list
                 let data_offset = writer.stream_position()?;
                 let compressed_size = self.write_compressed_posting_list(&mut writer, &merged_locations)?;
@@ -622,6 +632,12 @@ impl TrigramIndex {
         if let Some(trigram) = current_trigram {
             merged_locations.sort_unstable();
             merged_locations.dedup();
+
+            let cap = self.max_posting_list_entries;
+            if cap > 0 && merged_locations.len() > cap {
+                log::warn!("Trigram 0x{:06X} posting list has {} entries (cap {}); truncating.", trigram, merged_locations.len(), cap);
+                merged_locations.truncate(cap);
+            }
 
             let data_offset = writer.stream_position()?;
             let compressed_size = self.write_compressed_posting_list(&mut writer, &merged_locations)?;
@@ -1157,13 +1173,14 @@ impl TrigramIndex {
         );
 
         Ok(Self {
-            index: Vec::new(),  // Empty in lazy mode
+            index: Vec::new(), // Empty in lazy mode
             files,
             temp_index: None,
-            mmap: Some(mmap),  // Keep mmap alive for lazy decompression!
+            mmap: Some(mmap), // Keep mmap alive for lazy decompression!
             directory,
             partial_indices: Vec::new(),
             temp_dir: None,
+            max_posting_list_entries: 0,
         })
     }
 }
@@ -1460,5 +1477,33 @@ mod tests {
 
         // Note: Full roundtrip test verifies write works correctly.
         // Load verification is tested in production via query performance tests.
+    }
+
+    #[test]
+    fn test_posting_list_cap_enforced() {
+        let cap: usize = 10;
+        let content = "aaa ".repeat(200);
+        let mut index = TrigramIndex::new();
+        index.set_max_posting_list_entries(cap);
+        let file_id = index.add_file(PathBuf::from("dense.txt"));
+        index.index_file(file_id, &content);
+        index.finalize();
+        let aaa = bytes_to_trigram(b"aaa");
+        let list = index.get_posting_list(aaa).expect("aaa trigram should exist");
+        assert!(list.len() <= cap, "cap exceeded: {} > {}", list.len(), cap);
+    }
+
+    #[test]
+    fn test_posting_list_cap_zero_means_unlimited() {
+        let repetitions = 50;
+        let content = "aaa ".repeat(repetitions);
+        let mut index = TrigramIndex::new();
+        index.set_max_posting_list_entries(0);
+        let file_id = index.add_file(PathBuf::from("dense.txt"));
+        index.index_file(file_id, &content);
+        index.finalize();
+        let aaa = bytes_to_trigram(b"aaa");
+        let list = index.get_posting_list(aaa).expect("aaa trigram should exist");
+        assert!(list.len() >= repetitions, "expected >= {} entries, got {}", repetitions, list.len());
     }
 }

@@ -212,7 +212,7 @@ pub fn create_pulse_provider() -> Result<Box<dyn LlmProvider>> {
 
     let options = config::get_provider_options(&provider);
 
-    providers::create_provider(&provider, api_key, model, options)
+    providers::create_provider(&provider, api_key, model, options, semantic_config.timeout_seconds)
 }
 
 /// Narrate a structural context block using LLM.

@@ -1,6 +1,6 @@
 [package]
 name = "reflex-search"
-version = "1.2.0"
+version = "1.3.0"
 edition = "2024"
 authors = ["Reflex Contributors"]
 description = "A local-first, structure-aware code search engine for AI agents"
@@ -15,16 +15,16 @@ clap = { version = "4.5", features = ["derive"] }
 
 # Error handling
 anyhow = "1.0"
+thiserror = "1.0"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 json5 = "0.4"
-bincode = "1.3"
 strum = { version = "0.26", features = ["derive"] }
 
 # Parsing
-tree-sitter = "0.24"
+tree-sitter = "0.26"
 streaming-iterator = "0.1"
 
 # Tree-sitter grammars (using latest available versions)
@@ -40,14 +40,12 @@ tree-sitter-java = "0.23"
 tree-sitter-c-sharp = "0.23"
 tree-sitter-ruby = "0.23"
 tree-sitter-kotlin-ng = "1.1.0"
-# tree-sitter-swift = "0.7.1"  # Temporarily disabled - requires tree-sitter 0.23
 tree-sitter-zig = "1.1.2"
 
 # Hashing
 blake3 = "1.5"
+sha2 = "0.10"
 
-# Serialization
-rkyv = "0.8"
 memmap2 = "0.9"
 rusqlite = { version = "0.32", features = ["bundled"] }
 
@@ -118,10 +116,17 @@ textwrap = "0.16"
 
 [build-dependencies]
 blake3 = "1.5"
+sha2 = "0.10"
 
 [dev-dependencies]
 tempfile = "3.12"
 filetime = "0.2"
+criterion = { version = "0.5", features = ["html_reports"] }
+insta = "1"
+
+[[bench]]
+name = "trigram_bench"
+harness = false
 
 [[bin]]
 name = "rfx"

@@ -2531,3 +2531,69 @@ fn count_html_files(dir: &Path) -> usize {
         .filter(|e| e.path().extension().map(|ext| ext == "html").unwrap_or(false))
         .count()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn test_settings() -> insta::Settings {
+        let mut s = insta::Settings::clone_current();
+        s.set_snapshot_path(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/snapshots"),
+        );
+        s.set_prepend_module_to_snapshot(false);
+        s
+    }
+
+    #[test]
+    fn snapshot_zola_config_all_surfaces() {
+        let tmp = TempDir::new().unwrap();
+        write_zola_config(tmp.path(), "/", "Test Codebase", &[
+            Surface::Wiki, Surface::Changelog, Surface::Map,
+            Surface::Onboard, Surface::Timeline, Surface::Glossary, Surface::Explorer,
+        ]).unwrap();
+        let content = std::fs::read_to_string(tmp.path().join("config.toml")).unwrap();
+        test_settings().bind(|| {
+            insta::assert_snapshot!("pulse_site__zola_config_all_surfaces", content);
+        });
+    }
+
+    #[test]
+    fn snapshot_base_html_page_structure() {
+        let tmp = TempDir::new().unwrap();
+        create_directory_structure(tmp.path()).unwrap();
+        write_templates(tmp.path()).unwrap();
+        let content = std::fs::read_to_string(tmp.path().join("templates/base.html")).unwrap();
+        test_settings().bind(|| {
+            insta::assert_snapshot!("pulse_site__base_html_page_structure", content);
+        });
+    }
+
+    #[test]
+    fn snapshot_base_html_pagefind_integration() {
+        let tmp = TempDir::new().unwrap();
+        create_directory_structure(tmp.path()).unwrap();
+        write_templates(tmp.path()).unwrap();
+        let base_html = std::fs::read_to_string(tmp.path().join("templates/base.html")).unwrap();
+        let pagefind_section = base_html.lines()
+            .filter(|l| l.contains("pagefind"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        test_settings().bind(|| {
+            insta::assert_snapshot!("pulse_site__base_html_pagefind_integration", pagefind_section);
+        });
+    }
+
+    #[test]
+    fn snapshot_home_page_navigation_links() {
+        let tmp = TempDir::new().unwrap();
+        create_directory_structure(tmp.path()).unwrap();
+        write_home_page(tmp.path(), "My Project", "/", &[],
+            true, true, true, true, true, true, None, None, None).unwrap();
+        let content = std::fs::read_to_string(tmp.path().join("content/_index.md")).unwrap();
+        test_settings().bind(|| {
+            insta::assert_snapshot!("pulse_site__home_page_navigation_links", content);
+        });
+    }
+}

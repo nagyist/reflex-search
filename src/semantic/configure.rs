@@ -1365,6 +1365,7 @@ fn test_connectivity(
             api_key.to_string(),
             model_arg,
             options,
+            crate::semantic::config::SemanticConfig::default().timeout_seconds,
         )?;
 
         // Try to make a simple API call to test connectivity

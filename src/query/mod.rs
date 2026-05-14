@@ -3,6 +3,11 @@
 //! The query engine loads the memory-mapped cache and executes
 //! deterministic searches based on lexical, structural, or symbol patterns.
 
+pub mod filter;
+pub mod result;
+
+pub use filter::QueryFilter;
+
 use anyhow::{Context, Result};
 use regex::Regex;
 
@@ -16,80 +21,6 @@ use crate::output;
 use crate::parsers::ParserFactory;
 use crate::regex_trigrams::extract_trigrams_from_regex;
 use crate::trigram::TrigramIndex;
-
-/// Query filter options
-#[derive(Debug, Clone)]
-pub struct QueryFilter {
-    /// Language filter (None = all languages)
-    pub language: Option<Language>,
-    /// Symbol kind filter (None = all kinds)
-    pub kind: Option<SymbolKind>,
-    /// Use AST pattern matching (vs lexical search)
-    pub use_ast: bool,
-    /// Use regex pattern matching
-    pub use_regex: bool,
-    /// Maximum number of results
-    pub limit: Option<usize>,
-    /// Search symbol definitions only (vs full-text)
-    pub symbols_mode: bool,
-    /// Show full symbol body (from span.start_line to span.end_line)
-    pub expand: bool,
-    /// File path filter (substring match)
-    pub file_pattern: Option<String>,
-    /// Exact symbol name match (no substring matching)
-    pub exact: bool,
-    /// Use substring matching instead of word-boundary matching (opt-in, expansive)
-    pub use_contains: bool,
-    /// Query timeout in seconds (0 = no timeout)
-    pub timeout_secs: u64,
-    /// Glob patterns to include (empty = all files)
-    pub glob_patterns: Vec<String>,
-    /// Glob patterns to exclude (applied after includes)
-    pub exclude_patterns: Vec<String>,
-    /// Return only unique file paths (deduplicated)
-    pub paths_only: bool,
-    /// Pagination offset (skip first N results after sorting)
-    pub offset: Option<usize>,
-    /// Force execution of potentially expensive queries (bypass broad query detection)
-    pub force: bool,
-    /// Suppress warning/info output (for --json mode to ensure pure JSON output)
-    pub suppress_output: bool,
-    /// Include dependency information in results
-    pub include_dependencies: bool,
-    /// Test-only: Override large index threshold (None = use default of 20,000)
-    #[doc(hidden)]
-    pub test_large_index_threshold: Option<usize>,
-    /// Test-only: Override short pattern threshold (None = use default of 4)
-    #[doc(hidden)]
-    pub test_short_pattern_threshold: Option<usize>,
-}
-
-impl Default for QueryFilter {
-    fn default() -> Self {
-        Self {
-            language: None,
-            kind: None,
-            use_ast: false,
-            use_regex: false,
-            limit: Some(100),  // Default: limit to 100 results for token efficiency
-            symbols_mode: false,
-            expand: false,
-            file_pattern: None,
-            exact: false,
-            use_contains: false,  // Default: word-boundary matching
-            timeout_secs: 30, // 30 seconds default timeout
-            glob_patterns: Vec::new(),
-            exclude_patterns: Vec::new(),
-            paths_only: false,
-            offset: None,
-            force: false,  // Default: enable broad query detection
-            suppress_output: false,  // Default: show warnings/info
-            include_dependencies: false,  // Default: don't load dependencies for performance
-            test_large_index_threshold: None,  // Default: use production threshold (20,000)
-            test_short_pattern_threshold: None,  // Default: use production threshold (4)
-        }
-    }
-}
 
 /// Manages query execution against the index
 pub struct QueryEngine {
@@ -1764,33 +1695,7 @@ impl QueryEngine {
     /// This makes keyword queries more intuitive: searching for "class" returns
     /// only classes, not all symbols.
     fn keyword_to_kind(keyword: &str) -> Option<SymbolKind> {
-        match keyword {
-            // Classes and types
-            "class" => Some(SymbolKind::Class),
-            "struct" => Some(SymbolKind::Struct),
-            "enum" => Some(SymbolKind::Enum),
-            "interface" => Some(SymbolKind::Interface),
-            "trait" => Some(SymbolKind::Trait),
-            "type" => Some(SymbolKind::Type),
-            "record" => Some(SymbolKind::Struct),  // C# record types
-
-            // Functions and methods
-            "function" | "fn" | "def" | "func" => Some(SymbolKind::Function),
-
-            // Variables and constants
-            "const" | "static" => Some(SymbolKind::Constant),
-            "var" | "let" => Some(SymbolKind::Variable),
-
-            // Modules and namespaces
-            "mod" | "module" | "namespace" => Some(SymbolKind::Module),
-
-            // Other constructs
-            "impl" => None,  // impl blocks don't have a direct SymbolKind
-            "async" => None, // async is a modifier, not a symbol type
-
-            // Default: no mapping (return all symbols)
-            _ => None,
-        }
+        filter::keyword_to_kind(keyword)
     }
 
     /// Get all files matching the language filter (for keyword queries)
@@ -2236,82 +2141,20 @@ impl QueryEngine {
         Ok(())
     }
 
-    /// Helper function to find file_id in ContentReader by matching path
     fn find_file_id(content_reader: &ContentReader, target_path: &str) -> Option<u32> {
-        for file_id in 0..content_reader.file_count() {
-            if let Some(path) = content_reader.get_file_path(file_id as u32) {
-                if path.to_string_lossy() == target_path {
-                    return Some(file_id as u32);
-                }
-            }
-        }
-        None
+        result::find_file_id(content_reader, target_path)
     }
 
-    /// Rebuild trigram index from content store (fallback when trigrams.bin is missing)
     fn rebuild_trigram_index(content_reader: &ContentReader) -> Result<TrigramIndex> {
-        log::debug!("Rebuilding trigram index from {} files", content_reader.file_count());
-        let mut trigram_index = TrigramIndex::new();
-
-        for file_id in 0..content_reader.file_count() {
-            let file_path = content_reader.get_file_path(file_id as u32)
-                .context("Invalid file_id")?
-                .to_path_buf();
-            let content = content_reader.get_file_content(file_id as u32)?;
-
-            let idx = trigram_index.add_file(file_path);
-            trigram_index.index_file(idx, content);
-        }
-
-        trigram_index.finalize();
-        log::debug!("Trigram index rebuilt with {} trigrams", trigram_index.trigram_count());
-
-        Ok(trigram_index)
+        result::rebuild_trigram_index(content_reader)
     }
 
-    /// Normalize glob patterns for consistent matching
-    ///
-    /// Ensures glob patterns work correctly by auto-prepending "./" to relative paths
-    /// that don't already start with ".", "/", or "*". This fixes LLM-generated patterns
-    /// that omit the explicit relative path prefix.
-    ///
-    /// # Examples
-    /// - "services/**/*.php" → "./services/**/*.php"
-    /// - "./services/**/*.php" → "./services/**/*.php" (unchanged)
-    /// - "**/services/**/*.php" → "**/services/**/*.php" (unchanged)
-    /// - "/absolute/path/**" → "/absolute/path/**" (unchanged)
     fn normalize_glob_pattern(pattern: &str) -> String {
-        if pattern.starts_with('.') || pattern.starts_with('/') || pattern.starts_with('*') {
-            // Already has a prefix that works - don't modify
-            pattern.to_string()
-        } else {
-            // Relative path without explicit prefix - add "./"
-            format!("./{}", pattern)
-        }
+        result::normalize_glob_pattern(pattern)
     }
 
-    /// Check if pattern appears at word boundaries in a line
-    ///
-    /// Word boundary is defined as:
-    /// - Start/end of string
-    /// - Transition between word characters (\w) and non-word characters (\W)
-    ///
-    /// This is used for default (restrictive) matching to find complete identifiers
-    /// rather than substrings. For example:
-    /// - "Error" matches "Error" but not "NetworkError"
-    /// - "parse" matches "parse()" but not "parseUser()"
     fn has_word_boundary_match(line: &str, pattern: &str) -> bool {
-        // Build regex: \bpattern\b
-        let escaped_pattern = regex::escape(pattern);
-        let pattern_with_boundaries = format!(r"\b{}\b", escaped_pattern);
-
-        if let Ok(re) = Regex::new(&pattern_with_boundaries) {
-            re.is_match(line)
-        } else {
-            // If regex fails (shouldn't happen with escaped pattern), fall back to substring
-            log::debug!("Word boundary regex failed for pattern '{}', falling back to substring", pattern);
-            line.contains(pattern)
-        }
+        filter::has_word_boundary_match(line, pattern)
     }
 
     /// Get index status for programmatic use (doesn't print warnings)
@@ -2319,7 +2162,7 @@ impl QueryEngine {
     /// Returns (status, can_trust_results, warning) tuple for JSON output.
     /// This is optimized for AI agents to detect staleness and auto-reindex.
     fn get_index_status(&self) -> Result<(IndexStatus, bool, Option<IndexWarning>)> {
-        let root = std::env::current_dir()?;
+        let root = self.cache.workspace_root();
 
         // Check git state if in a git repo
         if crate::git::is_git_repo(&root) {
@@ -2419,10 +2262,19 @@ impl QueryEngine {
     /// 2. Commit changed: HEAD moved since indexing
     /// 3. File changes: quick mtime check on sample of files (if available)
     fn check_index_freshness(&self, filter: &QueryFilter) -> Result<()> {
-        let root = std::env::current_dir()?;
+        let root = self.cache.workspace_root();
 
         // Check git state if in a git repo
         if crate::git::is_git_repo(&root) {
+            if !crate::git::is_git_available() {
+                static WARNED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+                if !filter.suppress_output {
+                    WARNED.get_or_init(|| {
+                        output::warn("⚠️  git binary not found in PATH; index freshness checks disabled for this session.");
+                    });
+                }
+                return Ok(());
+            }
             if let Ok(current_branch) = crate::git::get_current_branch(&root) {
                 // Check if we're on a different branch than what was indexed
                 if !self.cache.branch_exists(&current_branch).unwrap_or(false) {

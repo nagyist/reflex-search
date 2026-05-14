@@ -153,7 +153,7 @@ impl Language {
             Language::CSharp => true,
             Language::Ruby => true,
             Language::Kotlin => true,
-            Language::Swift => false,  // Temporarily disabled - requires tree-sitter 0.23
+            Language::Swift => false,  // Temporarily disabled - parser queries out of date with tree-sitter-swift 0.7.x grammar
             Language::Zig => true,
             Language::Unknown => false,
         }
@@ -201,6 +201,22 @@ pub struct Dependency {
     pub line_number: usize,
     /// Imported symbols (for selective imports)
     pub imported_symbols: Option<Vec<String>>,
+}
+
+/// A lightweight, stable reference to a code symbol for API responses
+///
+/// Prefer this over `(String, SymbolKind, Span)` tuples — tuples serialize as
+/// positional JSON arrays, making any field addition a breaking change.
+/// Named fields here are additive-safe: new optional fields can be added without
+/// shifting positions or bumping the version.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SymbolRef {
+    /// Symbol name (e.g., function name, class name)
+    pub name: String,
+    /// Symbol kind (function, class, struct, etc.)
+    pub kind: SymbolKind,
+    /// Location span in source file
+    pub span: Span,
 }
 
 /// Helper function to skip serializing "Unknown" symbol kinds
@@ -307,6 +323,9 @@ pub struct IndexConfig {
     pub parallel_threads: usize,
     /// Query timeout in seconds (0 = no timeout)
     pub query_timeout_secs: u64,
+    /// Maximum entries per trigram posting list (0 = unlimited).
+    /// High-frequency trigrams are truncated at this threshold to bound query latency.
+    pub max_posting_list_entries: usize,
 }
 
 impl Default for IndexConfig {
@@ -319,6 +338,7 @@ impl Default for IndexConfig {
             max_file_size: 10 * 1024 * 1024, // 10 MB
             parallel_threads: 0, // 0 = auto (80% of available cores)
             query_timeout_secs: 30, // 30 seconds default timeout
+            max_posting_list_entries: 500_000, // cap at 500k to bound query latency
         }
     }
 }
@@ -435,4 +455,50 @@ pub struct CompactionReport {
     pub space_saved_bytes: u64,
     /// Duration in milliseconds
     pub duration_ms: u64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_symbol_ref_json_shape() {
+        let sym = SymbolRef {
+            name: "my_function".to_string(),
+            kind: SymbolKind::Function,
+            span: Span { start_line: 10, end_line: 20 },
+        };
+        let json = serde_json::to_value(&sym).unwrap();
+        assert_eq!(json["name"], "my_function");
+        assert_eq!(json["kind"], "Function");
+        assert_eq!(json["span"]["start_line"], 10);
+        assert_eq!(json["span"]["end_line"], 20);
+        assert!(json.as_array().is_none());
+    }
+
+    #[test]
+    fn test_symbol_ref_roundtrip() {
+        let original = SymbolRef {
+            name: "MyStruct".to_string(),
+            kind: SymbolKind::Struct,
+            span: Span { start_line: 1, end_line: 5 },
+        };
+        let json = serde_json::to_string(&original).unwrap();
+        let decoded: SymbolRef = serde_json::from_str(&json).unwrap();
+        assert_eq!(original, decoded);
+    }
+
+    #[test]
+    fn test_symbol_ref_exact_json() {
+        let sym = SymbolRef {
+            name: "Foo".to_string(),
+            kind: SymbolKind::Class,
+            span: Span { start_line: 3, end_line: 7 },
+        };
+        let json = serde_json::to_string(&sym).unwrap();
+        assert_eq!(
+            json,
+            r#"{"name":"Foo","kind":"Class","span":{"start_line":3,"end_line":7}}"#
+        );
+    }
 }

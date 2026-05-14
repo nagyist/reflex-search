@@ -4,6 +4,8 @@ pub mod openai;
 pub mod anthropic;
 pub mod openrouter;
 pub mod openai_compatible;
+#[cfg(test)]
+pub mod mock;
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -31,12 +33,6 @@ pub trait LlmProvider: Send + Sync {
 }
 
 /// Default model name for a provider, for display when no model is configured.
-///
-/// Mirrors the constructor defaults baked into each provider's `new()`. Returns
-/// `""` for `openai-compatible` because self-hosted endpoints have no
-/// predictable default — callers should render `""` as something like
-/// `"(not configured)"` and refuse the LLM call until the user configures a
-/// model. Returns `""` for unknown providers (callers should not invoke them).
 pub fn default_model_for(provider_name: &str) -> &'static str {
     match provider_name.to_lowercase().as_str() {
         "openai" => "gpt-4o-mini",
@@ -47,23 +43,20 @@ pub fn default_model_for(provider_name: &str) -> &'static str {
     }
 }
 
-/// Create a provider instance from name and API key
-///
-/// The `options` parameter allows passing provider-specific settings.
-/// Currently used by OpenRouter for sort strategy (e.g., `{"sort": "price"}`).
-/// Other providers ignore this parameter.
+/// Create a provider instance from name, API key, and request timeout.
 pub fn create_provider(
     provider_name: &str,
     api_key: String,
     model: Option<String>,
     options: Option<HashMap<String, String>>,
+    timeout_secs: u64,
 ) -> Result<Box<dyn LlmProvider>> {
     match provider_name.to_lowercase().as_str() {
-        "openai" => Ok(Box::new(openai::OpenAiProvider::new(api_key, model)?)),
-        "anthropic" => Ok(Box::new(anthropic::AnthropicProvider::new(api_key, model)?)),
+        "openai" => Ok(Box::new(openai::OpenAiProvider::new(api_key, model, timeout_secs)?)),
+        "anthropic" => Ok(Box::new(anthropic::AnthropicProvider::new(api_key, model, timeout_secs)?)),
         "openrouter" => {
             let sort = options.as_ref().and_then(|o| o.get("sort").cloned());
-            Ok(Box::new(openrouter::OpenRouterProvider::new(api_key, model, sort)?))
+            Ok(Box::new(openrouter::OpenRouterProvider::new(api_key, model, sort, timeout_secs)?))
         }
         "openai-compatible" | "openai_compatible" => {
             let base_url = options
@@ -77,7 +70,7 @@ pub fn create_provider(
             let model = model.unwrap_or_default();
             let key = if api_key.is_empty() { None } else { Some(api_key) };
             Ok(Box::new(openai_compatible::OpenAiCompatibleProvider::new(
-                key, model, base_url,
+                key, model, base_url, timeout_secs,
             )?))
         }
         _ => anyhow::bail!(
@@ -93,7 +86,7 @@ mod tests {
 
     #[test]
     fn test_create_provider_openai() {
-        let provider = create_provider("openai", "test-key".to_string(), None, None);
+        let provider = create_provider("openai", "test-key".to_string(), None, None, 300);
         assert!(provider.is_ok());
         assert_eq!(provider.unwrap().name(), "openai");
     }
@@ -111,13 +104,13 @@ mod tests {
 
     #[test]
     fn test_create_provider_case_insensitive() {
-        let provider = create_provider("OpenAI", "test-key".to_string(), None, None);
+        let provider = create_provider("OpenAI", "test-key".to_string(), None, None, 300);
         assert!(provider.is_ok());
     }
 
     #[test]
     fn test_create_provider_unknown() {
-        let provider = create_provider("unknown", "test-key".to_string(), None, None);
+        let provider = create_provider("unknown", "test-key".to_string(), None, None, 300);
         assert!(provider.is_err());
         if let Err(e) = provider {
             assert!(e.to_string().contains("Unknown provider"));
@@ -126,7 +119,7 @@ mod tests {
 
     #[test]
     fn test_create_provider_openrouter() {
-        let provider = create_provider("openrouter", "test-key".to_string(), None, None);
+        let provider = create_provider("openrouter", "test-key".to_string(), None, None, 300);
         assert!(provider.is_ok());
         assert_eq!(provider.unwrap().name(), "openrouter");
     }
@@ -140,6 +133,7 @@ mod tests {
             "test-key".to_string(),
             Some("openai/gpt-4o-mini".to_string()),
             Some(opts),
+            300,
         );
         assert!(provider.is_ok());
     }
@@ -153,6 +147,7 @@ mod tests {
             "test-key".to_string(),
             Some("qwen2.5-coder".to_string()),
             Some(opts),
+            300,
         );
         assert!(provider.is_ok());
         assert_eq!(provider.unwrap().name(), "openai-compatible");
@@ -167,6 +162,7 @@ mod tests {
             "test-key".to_string(),
             Some("qwen2.5-coder".to_string()),
             Some(opts),
+            300,
         );
         assert!(provider.is_ok());
     }
@@ -180,6 +176,7 @@ mod tests {
             String::new(),
             Some("qwen2.5-coder".to_string()),
             Some(opts),
+            300,
         );
         assert!(provider.is_ok());
     }
@@ -191,6 +188,7 @@ mod tests {
             String::new(),
             Some("qwen2.5-coder".to_string()),
             None,
+            300,
         );
         assert!(provider.is_err());
         if let Err(e) = provider {
@@ -207,6 +205,7 @@ mod tests {
             String::new(),
             None,
             Some(opts),
+            300,
         );
         assert!(provider.is_err());
     }

@@ -4,7 +4,7 @@
 
 Reflex is a code search engine designed for developers and AI coding assistants. It combines trigram indexing for full-text search with Tree-sitter parsing for symbol extraction and static analysis for dependency tracking. Unlike symbol-only tools, Reflex finds **every occurrence** of patterns, function calls, variable usage, comments, and more with deterministic, repeatable results.
 
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen)]()
+[![CI](https://github.com/reflex-search/reflex/actions/workflows/ci.yml/badge.svg)](https://github.com/reflex-search/reflex/actions/workflows/ci.yml)
 [![Tests](https://img.shields.io/badge/tests-347%20passing-brightgreen)]()
 [![License](https://img.shields.io/badge/license-MIT-blue)]()
 [![gitcgr](https://gitcgr.com/badge/reflex-search/reflex.svg)](https://gitcgr.com/reflex-search/reflex)
@@ -648,6 +648,29 @@ cargo test                    # Run all tests
 cargo test -- --nocapture     # Run with output
 cargo test indexer::tests     # Run specific module
 ```
+
+## 🔒 Security / Threat Model
+
+### `rfx serve` HTTP API
+
+`rfx serve` starts a local HTTP API server. It is designed as a **local-only, single-user tool** with no authentication.
+
+| Setting | Default | Notes |
+|---------|---------|-------|
+| Bind address | `127.0.0.1` (loopback) | Accessible only from the local machine |
+| Port | `7878` | Configurable with `--port` |
+| Authentication | None | By design — local tool only |
+
+**To bind to a different address:**
+```bash
+rfx serve --host 0.0.0.0 --port 7878   # ⚠️ Exposes to the network
+```
+
+> **Warning:** Binding to `0.0.0.0` or any non-loopback address exposes your entire codebase index to the network without authentication. Do not do this on shared or internet-facing machines. If you need network-accessible search, place an authenticated reverse proxy in front of it.
+
+### JSON Output: Language Field
+
+The `language` field in search results serializes as an enum string (e.g. `"Rust"`, `"Python"`). For unrecognized file types it serializes as `"Unknown"`. **Do not exhaustively match on this field** — new languages may be added in minor releases. Always include an `"Unknown"` fallback in your client code.
 
 ## 🤝 Contributing
 

@@ -138,6 +138,10 @@ fn handle_list_tools(_params: Option<Value>) -> Result<Value> {
                         "force": {
                             "type": "boolean",
                             "description": "Force execution of potentially expensive queries (bypasses broad query detection)"
+                        },
+                        "dependencies": {
+                            "type": "boolean",
+                            "description": "Include dependency information (imports) in results. Only extracts static imports."
                         }
                     },
                     "required": ["pattern"]
@@ -182,6 +186,10 @@ fn handle_list_tools(_params: Option<Value>) -> Result<Value> {
                         "force": {
                             "type": "boolean",
                             "description": "Force execution of potentially expensive queries (bypasses broad query detection)"
+                        },
+                        "dependencies": {
+                            "type": "boolean",
+                            "description": "Include dependency information (imports) in results. Only extracts static imports."
                         }
                     },
                     "required": ["pattern"]
@@ -298,6 +306,10 @@ fn handle_list_tools(_params: Option<Value>) -> Result<Value> {
                         "force": {
                             "type": "boolean",
                             "description": "Force execution of potentially expensive queries (bypasses broad query detection)"
+                        },
+                        "dependencies": {
+                            "type": "boolean",
+                            "description": "Include dependency information (imports) in results. Only extracts static imports."
                         }
                     },
                     "required": ["pattern"]
@@ -346,6 +358,10 @@ fn handle_list_tools(_params: Option<Value>) -> Result<Value> {
                         "force": {
                             "type": "boolean",
                             "description": "Force execution of potentially expensive queries (bypasses broad query detection)"
+                        },
+                        "dependencies": {
+                            "type": "boolean",
+                            "description": "Include dependency information (imports) in results. Only extracts static imports."
                         }
                     },
                     "required": ["pattern", "lang"]
@@ -598,6 +614,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
                 .unwrap_or_default();
             let force = arguments["force"].as_bool().unwrap_or(false);
+            let dependencies = arguments["dependencies"].as_bool().unwrap_or(false);
 
             let language = parse_language(lang);
 
@@ -619,7 +636,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 offset: None,
                 force,
                 suppress_output: true,  // MCP always returns JSON
-                include_dependencies: false,  // TODO: Add MCP parameter to enable dependencies
+                include_dependencies: dependencies,
                 ..Default::default()
             };
 
@@ -673,6 +690,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
                 .unwrap_or_default();
             let force = arguments["force"].as_bool().unwrap_or(false);
+            let dependencies = arguments["dependencies"].as_bool().unwrap_or(false);
 
             let language = parse_language(lang);
             let parsed_kind = parse_symbol_kind(kind);
@@ -696,7 +714,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 offset: None,
                 force,
                 suppress_output: true,  // MCP always returns JSON
-                include_dependencies: false,  // TODO: Add MCP parameter to enable dependencies
+                include_dependencies: dependencies,
                 ..Default::default()
             };
 
@@ -843,6 +861,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 .unwrap_or_default();
             let paths_only = arguments["paths"].as_bool().unwrap_or(false);
             let force = arguments["force"].as_bool().unwrap_or(false);
+            let dependencies = arguments["dependencies"].as_bool().unwrap_or(false);
 
             let language = parse_language(lang);
             let offset = arguments["offset"].as_u64().map(|n| n as usize);
@@ -874,7 +893,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 offset,
                 force,
                 suppress_output: true,  // MCP always returns JSON
-                include_dependencies: false,  // TODO: Add MCP parameter to enable dependencies
+                include_dependencies: dependencies,
                 ..Default::default()
             };
 
@@ -938,6 +957,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 .unwrap_or_default();
             let paths_only = arguments["paths"].as_bool().unwrap_or(false);
             let force = arguments["force"].as_bool().unwrap_or(false);
+            let dependencies = arguments["dependencies"].as_bool().unwrap_or(false);
 
             let language = parse_language(Some(lang_str))
                 .ok_or_else(|| anyhow::anyhow!("Invalid or unsupported language for AST queries"))?;
@@ -977,7 +997,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 offset,
                 force,
                 suppress_output: true,  // MCP always returns JSON
-                include_dependencies: false,  // TODO: Add MCP parameter to enable dependencies
+                include_dependencies: dependencies,
                 ..Default::default()
             };
 

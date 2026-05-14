@@ -649,6 +649,29 @@ cargo test -- --nocapture     # Run with output
 cargo test indexer::tests     # Run specific module
 ```
 
+## 🔒 Security / Threat Model
+
+### `rfx serve` HTTP API
+
+`rfx serve` starts a local HTTP API server. It is designed as a **local-only, single-user tool** with no authentication.
+
+| Setting | Default | Notes |
+|---------|---------|-------|
+| Bind address | `127.0.0.1` (loopback) | Accessible only from the local machine |
+| Port | `7878` | Configurable with `--port` |
+| Authentication | None | By design — local tool only |
+
+**To bind to a different address:**
+```bash
+rfx serve --host 0.0.0.0 --port 7878   # ⚠️ Exposes to the network
+```
+
+> **Warning:** Binding to `0.0.0.0` or any non-loopback address exposes your entire codebase index to the network without authentication. Do not do this on shared or internet-facing machines. If you need network-accessible search, place an authenticated reverse proxy in front of it.
+
+### JSON Output: Language Field
+
+The `language` field in search results serializes as an enum string (e.g. `"Rust"`, `"Python"`). For unrecognized file types it serializes as `"Unknown"`. **Do not exhaustively match on this field** — new languages may be added in minor releases. Always include an `"Unknown"` fallback in your client code.
+
 ## 🤝 Contributing
 
 Contributions welcome! Reflex is built to be:

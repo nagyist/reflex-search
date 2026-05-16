@@ -17,6 +17,7 @@ use crate::cache::CacheManager;
 use crate::content_store::{ContentReader, ContentWriter};
 use crate::dependency::DependencyIndex;
 use crate::models::{Dependency, ImportType, IndexConfig, IndexStats, Language};
+#[cfg(unix)]
 use crate::output;
 use crate::parsers::c::CDependencyExtractor;
 use crate::parsers::cpp::CppDependencyExtractor;
@@ -2039,6 +2040,7 @@ impl Indexer {
     ///
     /// Ensures there's enough free space to create the index. Warns if disk space is low.
     /// This prevents partial index writes and confusing error messages.
+    #[cfg_attr(not(unix), allow(unused_variables))]
     fn check_disk_space(&self, root: &Path) -> Result<()> {
         // Get available space on the filesystem containing the cache directory
         let cache_path = self.cache.path();

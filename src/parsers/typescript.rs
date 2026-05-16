@@ -58,7 +58,7 @@ pub fn parse(path: &str, source: &str, language: Language) -> Result<Vec<SearchR
     // Add file path and language to all symbols
     for symbol in &mut symbols {
         symbol.path = path.to_string();
-        symbol.lang = language.clone();
+        symbol.lang = language;
     }
 
     Ok(symbols)
@@ -203,7 +203,7 @@ fn extract_variables(
         let mut declarator_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             if capture_name == "name" {
                 name = Some(
                     capture
@@ -213,10 +213,10 @@ fn extract_variables(
                         .to_string(),
                 );
                 // Get the variable_declarator node
-                if let Some(parent) = capture.node.parent() {
-                    if parent.kind() == "variable_declarator" {
-                        declarator_node = Some(parent);
-                    }
+                if let Some(parent) = capture.node.parent()
+                    && parent.kind() == "variable_declarator"
+                {
+                    declarator_node = Some(parent);
                 }
             }
         }
@@ -225,38 +225,36 @@ fn extract_variables(
             // Check if the value is an arrow function (skip those)
             let mut is_arrow_function = false;
             for i in 0..declarator.child_count() {
-                if let Some(child) = declarator.child(i as u32) {
-                    if child.kind() == "arrow_function" {
-                        is_arrow_function = true;
-                        break;
-                    }
+                if let Some(child) = declarator.child(i as u32)
+                    && child.kind() == "arrow_function"
+                {
+                    is_arrow_function = true;
+                    break;
                 }
             }
 
             // Only add if it's NOT an arrow function
-            if !is_arrow_function {
-                if let Some(decl_node) = declarator.parent() {
-                    let span = node_to_span(&decl_node);
-                    let preview = extract_preview(source, &span);
+            if !is_arrow_function && let Some(decl_node) = declarator.parent() {
+                let span = node_to_span(&decl_node);
+                let preview = extract_preview(source, &span);
 
-                    // Determine if it's a constant (const) or variable (let/var)
-                    let decl_text = decl_node.utf8_text(source.as_bytes()).unwrap_or("");
-                    let kind = if decl_text.trim_start().starts_with("const") {
-                        SymbolKind::Constant
-                    } else {
-                        SymbolKind::Variable
-                    };
+                // Determine if it's a constant (const) or variable (let/var)
+                let decl_text = decl_node.utf8_text(source.as_bytes()).unwrap_or("");
+                let kind = if decl_text.trim_start().starts_with("const") {
+                    SymbolKind::Constant
+                } else {
+                    SymbolKind::Variable
+                };
 
-                    symbols.push(SearchResult::new(
-                        String::new(),
-                        Language::TypeScript,
-                        kind,
-                        Some(name),
-                        span,
-                        None,
-                        preview,
-                    ));
-                }
+                symbols.push(SearchResult::new(
+                    String::new(),
+                    Language::TypeScript,
+                    kind,
+                    Some(name),
+                    span,
+                    None,
+                    preview,
+                ));
             }
         }
     }
@@ -297,7 +295,7 @@ fn extract_methods(
         let mut method_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             match capture_name {
                 "class_name" => {
                     class_name = Some(
@@ -371,7 +369,7 @@ fn extract_symbols(
         let mut full_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             if capture_name == "name" {
                 name = Some(
                     capture
@@ -423,7 +421,7 @@ fn extract_preview(source: &str, span: &Span) -> String {
     let lines: Vec<&str> = source.lines().collect();
 
     // Extract 7 lines: the start line and 6 following lines
-    let start_idx = (span.start_line - 1) as usize; // Convert back to 0-indexed
+    let start_idx = span.start_line - 1; // Convert back to 0-indexed
     let end_idx = (start_idx + 7).min(lines.len());
 
     lines[start_idx..end_idx].join("\n")
@@ -538,7 +536,7 @@ mod tests {
         );
 
         // Check scope
-        for method in method_symbols {
+        for _method in method_symbols {
             // Removed: scope field no longer exists: assert_eq!(method.scope.as_ref().unwrap(), "class Calculator");
         }
     }
@@ -807,7 +805,7 @@ mod tests {
         );
 
         // Check scope
-        for method in method_symbols {
+        for _method in method_symbols {
             // Removed: scope field no longer exists: assert_eq!(method.scope.as_ref().unwrap(), "class CentralUsersModule");
         }
     }
@@ -1022,7 +1020,7 @@ fn extract_import_declarations(
         let mut import_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             match capture_name {
                 "import_path" => {
                     // Remove quotes from string literal
@@ -1087,7 +1085,7 @@ fn extract_require_statements(
         let mut require_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             match capture_name {
                 "func_name" => {
                     func_name = Some(capture.node.utf8_text(source.as_bytes()).unwrap_or(""));
@@ -1109,18 +1107,18 @@ fn extract_require_statements(
         }
 
         // Only process if it's actually a require() call
-        if func_name == Some("require") {
-            if let (Some(path), Some(node)) = (require_path, require_node) {
-                let import_type = classify_js_import(&path, alias_map);
-                let line_number = node.start_position().row + 1;
+        if func_name == Some("require")
+            && let (Some(path), Some(node)) = (require_path, require_node)
+        {
+            let import_type = classify_js_import(&path, alias_map);
+            let line_number = node.start_position().row + 1;
 
-                imports.push(ImportInfo {
-                    imported_path: path,
-                    import_type,
-                    line_number,
-                    imported_symbols: None, // require doesn't have selective imports
-                });
-            }
+            imports.push(ImportInfo {
+                imported_path: path,
+                import_type,
+                line_number,
+                imported_symbols: None, // require doesn't have selective imports
+            });
         }
     }
 
@@ -1383,7 +1381,7 @@ fn extract_export_from_statements(
         let mut export_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             match capture_name {
                 "source_path" => {
                     // Remove quotes from string literal

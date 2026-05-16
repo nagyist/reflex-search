@@ -221,7 +221,7 @@ fn test_symbol_query_performance() {
     let results = engine.search("gre", filter).unwrap();
     let duration = start.elapsed();
 
-    assert!(results.len() >= 1);
+    assert!(!results.is_empty());
 
     // Symbol query with runtime parsing may be slower for large result sets
     // Trigrams narrow to ~100 files, then tree-sitter parses each

@@ -1,3 +1,5 @@
+#![allow(dead_code)] // TUI refactor in progress — many items are scaffolded but not yet wired up
+
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyEvent, MouseEvent};
 use ratatui::{Terminal, backend::CrosstermBackend};
@@ -319,133 +321,129 @@ impl InteractiveApp {
             }
 
             // Check for search results
-            if let Some(ref rx) = self.search_rx {
-                if let Ok(result) = rx.try_recv() {
-                    // Search completed
-                    match result {
-                        Ok(response) => {
-                            // Flatten grouped results to SearchResult vec for display
-                            let flat_results = response
-                                .results
-                                .iter()
-                                .flat_map(|file_group| {
-                                    file_group.matches.iter().map(move |m| {
-                                        crate::models::SearchResult {
-                                            path: file_group.path.clone(),
-                                            lang: crate::models::Language::Unknown,
-                                            kind: m.kind.clone(),
-                                            symbol: m.symbol.clone(),
-                                            span: m.span.clone(),
-                                            preview: m.preview.clone(),
-                                            dependencies: file_group.dependencies.clone(),
-                                        }
-                                    })
+            if let Some(ref rx) = self.search_rx
+                && let Ok(result) = rx.try_recv()
+            {
+                // Search completed
+                match result {
+                    Ok(response) => {
+                        // Flatten grouped results to SearchResult vec for display
+                        let flat_results = response
+                            .results
+                            .iter()
+                            .flat_map(|file_group| {
+                                file_group.matches.iter().map(move |m| {
+                                    crate::models::SearchResult {
+                                        path: file_group.path.clone(),
+                                        lang: crate::models::Language::Unknown,
+                                        kind: m.kind.clone(),
+                                        symbol: m.symbol.clone(),
+                                        span: m.span.clone(),
+                                        preview: m.preview.clone(),
+                                        dependencies: file_group.dependencies.clone(),
+                                    }
                                 })
-                                .collect();
+                            })
+                            .collect();
 
-                            self.results.set_results(flat_results);
-                            self.error_message = None;
+                        self.results.set_results(flat_results);
+                        self.error_message = None;
 
-                            // Add to history
-                            let pattern = self.input.value().to_string();
-                            self.history.add(pattern, self.filters.clone());
+                        // Add to history
+                        let pattern = self.input.value().to_string();
+                        self.history.add(pattern, self.filters.clone());
 
-                            // Auto-move to results after search
-                            // BUT: don't auto-focus if regex/contains filters are active during typing
-                            // to prevent rendering corruption
-                            let should_auto_focus =
-                                !self.results.is_empty() && self.focus_state != FocusState::Input;
-                            if should_auto_focus {
-                                self.focus_state = FocusState::Results;
-                            }
-                        }
-                        Err(e) => {
-                            self.error_message = Some(format!("Search error: {}", e));
-                            self.results.clear();
+                        // Auto-move to results after search
+                        // BUT: don't auto-focus if regex/contains filters are active during typing
+                        // to prevent rendering corruption
+                        let should_auto_focus =
+                            !self.results.is_empty() && self.focus_state != FocusState::Input;
+                        if should_auto_focus {
+                            self.focus_state = FocusState::Results;
                         }
                     }
-                    self.searching = false;
-                    self.search_rx = None;
+                    Err(e) => {
+                        self.error_message = Some(format!("Search error: {}", e));
+                        self.results.clear();
+                    }
                 }
+                self.searching = false;
+                self.search_rx = None;
             }
 
             // Check for debounced filter change (auto-search after 1.5s)
-            if let Some(change_time) = self.filter_change_time {
-                if change_time.elapsed() >= Duration::from_millis(self.filter_debounce_ms) {
-                    // Debounce period elapsed, trigger search if input is not empty
-                    if !self.input.value().trim().is_empty() && !self.searching {
-                        let _ = self.execute_search();
-                    }
-                    self.filter_change_time = None;
+            if let Some(change_time) = self.filter_change_time
+                && change_time.elapsed() >= Duration::from_millis(self.filter_debounce_ms)
+            {
+                // Debounce period elapsed, trigger search if input is not empty
+                if !self.input.value().trim().is_empty() && !self.searching {
+                    let _ = self.execute_search();
                 }
+                self.filter_change_time = None;
             }
 
             // Auto-clear info messages after 3 seconds
-            if let Some(info_time) = self.info_message_time {
-                if info_time.elapsed() >= Duration::from_secs(3) {
-                    self.info_message = None;
-                    self.info_message_time = None;
-                }
+            if let Some(info_time) = self.info_message_time
+                && info_time.elapsed() >= Duration::from_secs(3)
+            {
+                self.info_message = None;
+                self.info_message_time = None;
             }
 
             // Check for indexing progress updates
-            if let Some(ref rx) = self.index_progress_rx {
-                if let Ok((current, total, status)) = rx.try_recv() {
-                    // Update progress state (preserve symbol status)
-                    let symbol_status = match &self.index_status {
-                        IndexStatusState::Indexing { symbol_status, .. } => symbol_status.clone(),
-                        IndexStatusState::Ready { symbol_status, .. } => symbol_status.clone(),
-                        IndexStatusState::Stale { symbol_status, .. } => symbol_status.clone(),
-                        IndexStatusState::Missing => SymbolIndexingState::NotStarted,
-                    };
-                    self.index_status = IndexStatusState::Indexing {
-                        current,
-                        total,
-                        status,
-                        symbol_status,
-                    };
-                }
+            if let Some(ref rx) = self.index_progress_rx
+                && let Ok((current, total, status)) = rx.try_recv()
+            {
+                // Update progress state (preserve symbol status)
+                let symbol_status = match &self.index_status {
+                    IndexStatusState::Indexing { symbol_status, .. } => symbol_status.clone(),
+                    IndexStatusState::Ready { symbol_status, .. } => symbol_status.clone(),
+                    IndexStatusState::Stale { symbol_status, .. } => symbol_status.clone(),
+                    IndexStatusState::Missing => SymbolIndexingState::NotStarted,
+                };
+                self.index_status = IndexStatusState::Indexing {
+                    current,
+                    total,
+                    status,
+                    symbol_status,
+                };
             }
 
             // Check for indexing results
-            if let Some(ref rx) = self.index_rx {
-                if let Ok(result) = rx.try_recv() {
-                    // Indexing completed
-                    match result {
-                        Ok(stats) => {
-                            // Preserve or check symbol status
-                            let symbol_status = match &self.index_status {
-                                IndexStatusState::Indexing { symbol_status, .. } => {
-                                    symbol_status.clone()
-                                }
-                                IndexStatusState::Ready { symbol_status, .. } => {
-                                    symbol_status.clone()
-                                }
-                                IndexStatusState::Stale { symbol_status, .. } => {
-                                    symbol_status.clone()
-                                }
-                                IndexStatusState::Missing => SymbolIndexingState::NotStarted,
-                            };
-                            self.index_status = IndexStatusState::Ready {
-                                file_count: stats.total_files,
-                                last_updated: "just now".to_string(),
-                                symbol_status,
-                            };
-                            // Don't re-trigger search - keep current results
-                        }
-                        Err(e) => {
-                            self.error_message = Some(format!("Index error: {}", e));
-                        }
+            if let Some(ref rx) = self.index_rx
+                && let Ok(result) = rx.try_recv()
+            {
+                // Indexing completed
+                match result {
+                    Ok(stats) => {
+                        // Preserve or check symbol status
+                        let symbol_status = match &self.index_status {
+                            IndexStatusState::Indexing { symbol_status, .. } => {
+                                symbol_status.clone()
+                            }
+                            IndexStatusState::Ready { symbol_status, .. } => symbol_status.clone(),
+                            IndexStatusState::Stale { symbol_status, .. } => symbol_status.clone(),
+                            IndexStatusState::Missing => SymbolIndexingState::NotStarted,
+                        };
+                        self.index_status = IndexStatusState::Ready {
+                            file_count: stats.total_files,
+                            last_updated: "just now".to_string(),
+                            symbol_status,
+                        };
+                        // Don't re-trigger search - keep current results
                     }
-                    self.indexing = false;
-                    self.indexing_start_time = None;
-                    self.index_rx = None;
-                    self.index_progress_rx = None;
+                    Err(e) => {
+                        self.error_message = Some(format!("Index error: {}", e));
+                    }
                 }
+                self.indexing = false;
+                self.indexing_start_time = None;
+                self.index_rx = None;
+                self.index_progress_rx = None;
             }
 
             // Poll background symbol indexer status (every few frames to reduce overhead)
-            if self.effects.frame() % 30 == 0 {
+            if self.effects.frame().is_multiple_of(30) {
                 // Every ~0.5s at 60fps
                 log::trace!(
                     "Polling background symbol indexer status (frame {})",
@@ -543,52 +541,52 @@ impl InteractiveApp {
 
     fn handle_key_event_with_editor(&mut self, key: KeyEvent) -> Result<Option<SearchResult>> {
         // Handle filter selector mode first
-        if self.mode == AppMode::FilterSelector {
-            if let Some(ref mut selector) = self.filter_selector {
-                if key.code == crossterm::event::KeyCode::Esc {
-                    // Close selector without selection
-                    self.mode = AppMode::Normal;
-                    self.filter_selector = None;
-                    return Ok(None);
-                }
-
-                if let Some(selection) = selector.handle_key(key.code) {
-                    // We need to know which type of selector this is
-                    // Let's check by seeing if selection is a valid language or kind
-                    let selection_lower = selection.to_lowercase();
-                    let is_language = matches!(
-                        selection_lower.as_str(),
-                        "rust"
-                            | "python"
-                            | "javascript"
-                            | "typescript"
-                            | "vue"
-                            | "svelte"
-                            | "go"
-                            | "java"
-                            | "php"
-                            | "c"
-                            | "cpp"
-                            | "csharp"
-                            | "ruby"
-                            | "kotlin"
-                            | "zig"
-                    );
-
-                    if is_language {
-                        self.filters.language = Some(selection);
-                    } else {
-                        self.filters.kind = Some(selection);
-                    }
-
-                    self.mode = AppMode::Normal;
-                    self.filter_selector = None;
-                    self.cancel_ongoing_search(); // Cancel old search immediately
-                    self.filter_change_time = Some(Instant::now());
-                    self.info_message = None;
-                }
+        if self.mode == AppMode::FilterSelector
+            && let Some(ref mut selector) = self.filter_selector
+        {
+            if key.code == crossterm::event::KeyCode::Esc {
+                // Close selector without selection
+                self.mode = AppMode::Normal;
+                self.filter_selector = None;
                 return Ok(None);
             }
+
+            if let Some(selection) = selector.handle_key(key.code) {
+                // We need to know which type of selector this is
+                // Let's check by seeing if selection is a valid language or kind
+                let selection_lower = selection.to_lowercase();
+                let is_language = matches!(
+                    selection_lower.as_str(),
+                    "rust"
+                        | "python"
+                        | "javascript"
+                        | "typescript"
+                        | "vue"
+                        | "svelte"
+                        | "go"
+                        | "java"
+                        | "php"
+                        | "c"
+                        | "cpp"
+                        | "csharp"
+                        | "ruby"
+                        | "kotlin"
+                        | "zig"
+                );
+
+                if is_language {
+                    self.filters.language = Some(selection);
+                } else {
+                    self.filters.kind = Some(selection);
+                }
+
+                self.mode = AppMode::Normal;
+                self.filter_selector = None;
+                self.cancel_ongoing_search(); // Cancel old search immediately
+                self.filter_change_time = Some(Instant::now());
+                self.info_message = None;
+            }
+            return Ok(None);
         }
 
         // Handle Tab/Shift+Tab for focus cycling
@@ -618,13 +616,12 @@ impl InteractiveApp {
         // Handle Enter - different behavior based on focus
         if key.code == crossterm::event::KeyCode::Enter {
             match self.focus_state {
-                FocusState::Input => {
+                FocusState::Input
                     // Execute search and move to results
-                    if !self.input.value().trim().is_empty() {
+                    if !self.input.value().trim().is_empty() => {
                         self.execute_search()?;
                         self.focus_state = FocusState::Results;
                     }
-                }
                 FocusState::Results => {
                     // Expand file preview
                     if let Some(result) = self.results.selected().cloned() {
@@ -851,7 +848,7 @@ impl InteractiveApp {
         let language = std::path::Path::new(&result.path)
             .extension()
             .and_then(|ext| ext.to_str())
-            .map(|ext| crate::models::Language::from_extension(ext))
+            .map(crate::models::Language::from_extension)
             .unwrap_or(crate::models::Language::Unknown);
 
         self.preview_content = Some(FilePreview {
@@ -867,10 +864,10 @@ impl InteractiveApp {
     }
 
     fn scroll_preview_down(&mut self) {
-        if let Some(ref mut preview) = self.preview_content {
-            if preview.scroll_offset + 20 < preview.content.len() {
-                preview.scroll_offset += 1;
-            }
+        if let Some(ref mut preview) = self.preview_content
+            && preview.scroll_offset + 20 < preview.content.len()
+        {
+            preview.scroll_offset += 1;
         }
     }
 
@@ -883,41 +880,41 @@ impl InteractiveApp {
     fn handle_mouse_event(&mut self, mouse: MouseEvent, terminal_size: (u16, u16)) {
         // In filter selector mode, pass events to the selector
         if self.mode == AppMode::FilterSelector {
-            if let Some(ref mut selector) = self.filter_selector {
-                if let Some(selection) = selector.handle_mouse(mouse) {
-                    // Selection was made
-                    let selection_lower = selection.to_lowercase();
-                    let is_language = matches!(
-                        selection_lower.as_str(),
-                        "rust"
-                            | "python"
-                            | "javascript"
-                            | "typescript"
-                            | "vue"
-                            | "svelte"
-                            | "go"
-                            | "java"
-                            | "php"
-                            | "c"
-                            | "cpp"
-                            | "csharp"
-                            | "ruby"
-                            | "kotlin"
-                            | "zig"
-                    );
+            if let Some(ref mut selector) = self.filter_selector
+                && let Some(selection) = selector.handle_mouse(mouse)
+            {
+                // Selection was made
+                let selection_lower = selection.to_lowercase();
+                let is_language = matches!(
+                    selection_lower.as_str(),
+                    "rust"
+                        | "python"
+                        | "javascript"
+                        | "typescript"
+                        | "vue"
+                        | "svelte"
+                        | "go"
+                        | "java"
+                        | "php"
+                        | "c"
+                        | "cpp"
+                        | "csharp"
+                        | "ruby"
+                        | "kotlin"
+                        | "zig"
+                );
 
-                    if is_language {
-                        self.filters.language = Some(selection);
-                    } else {
-                        self.filters.kind = Some(selection);
-                    }
-
-                    self.mode = AppMode::Normal;
-                    self.filter_selector = None;
-                    self.cancel_ongoing_search(); // Cancel old search immediately
-                    self.filter_change_time = Some(Instant::now());
-                    self.info_message = None;
+                if is_language {
+                    self.filters.language = Some(selection);
+                } else {
+                    self.filters.kind = Some(selection);
                 }
+
+                self.mode = AppMode::Normal;
+                self.filter_selector = None;
+                self.cancel_ongoing_search(); // Cancel old search immediately
+                self.filter_change_time = Some(Instant::now());
+                self.info_message = None;
             }
             return;
         }
@@ -1258,10 +1255,10 @@ impl InteractiveApp {
 
         for file_name in &files_to_remove {
             let file_path = cache_dir.join(file_name);
-            if file_path.exists() {
-                if let Err(e) = std::fs::remove_file(&file_path) {
-                    log::warn!("Failed to remove {}: {}", file_name, e);
-                }
+            if file_path.exists()
+                && let Err(e) = std::fs::remove_file(&file_path)
+            {
+                log::warn!("Failed to remove {}: {}", file_name, e);
             }
         }
 

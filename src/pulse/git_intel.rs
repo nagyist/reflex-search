@@ -8,6 +8,8 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
 
+type WeekData = (usize, Vec<String>, HashMap<String, usize>);
+
 /// Complete git intelligence data
 #[derive(Debug, Clone)]
 pub struct GitIntel {
@@ -149,7 +151,7 @@ fn compute_contributors(commits: &[CommitInfo]) -> Vec<Contributor> {
         })
         .collect();
 
-    contributors.sort_by(|a, b| b.commit_count.cmp(&a.commit_count));
+    contributors.sort_by_key(|a| std::cmp::Reverse(a.commit_count));
     contributors
 }
 
@@ -208,7 +210,7 @@ fn extract_file_churn(root: &Path) -> Result<Vec<FileChurn>> {
         })
         .collect();
 
-    churn.sort_by(|a, b| b.change_count.cmp(&a.change_count));
+    churn.sort_by_key(|a| std::cmp::Reverse(a.change_count));
     churn.truncate(50); // Top 50 most-changed files
 
     Ok(churn)
@@ -221,7 +223,7 @@ fn compute_weekly_summaries(root: &Path, commits: &[CommitInfo]) -> Result<Vec<W
     }
 
     // Group commits by ISO week
-    let mut weeks: HashMap<String, (usize, Vec<String>, HashMap<String, usize>)> = HashMap::new();
+    let mut weeks: HashMap<String, WeekData> = HashMap::new();
 
     for commit in commits {
         // Convert timestamp to week start date (Monday)
@@ -229,7 +231,7 @@ fn compute_weekly_summaries(root: &Path, commits: &[CommitInfo]) -> Result<Vec<W
         // Simple week computation: round down to nearest Monday
         let days_since_epoch = ts / 86400;
         // 1970-01-01 was a Thursday (day 4), so Monday of that week = day -3
-        let week_day = ((days_since_epoch + 3) % 7) as i64; // 0=Monday
+        let week_day = (days_since_epoch + 3) % 7; // 0=Monday
         let monday = days_since_epoch - week_day;
         let week_key = format!("{}", monday); // Use epoch-day of Monday as key
 
@@ -252,27 +254,27 @@ fn compute_weekly_summaries(root: &Path, commits: &[CommitInfo]) -> Result<Vec<W
 
     let mut week_files: HashMap<String, HashMap<String, bool>> = HashMap::new();
 
-    if let Ok(output) = output {
-        if output.status.success() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let mut current_ts: i64 = 0;
-            for line in stdout.lines() {
-                let trimmed = line.trim();
-                if trimmed.is_empty() {
-                    continue;
-                }
-                if let Ok(ts) = trimmed.parse::<i64>() {
-                    current_ts = ts;
-                } else if current_ts > 0 {
-                    let days = current_ts / 86400;
-                    let week_day = ((days + 3) % 7) as i64;
-                    let monday = days - week_day;
-                    let week_key = format!("{}", monday);
-                    week_files
-                        .entry(week_key)
-                        .or_default()
-                        .insert(trimmed.to_string(), true);
-                }
+    if let Ok(output) = output
+        && output.status.success()
+    {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut current_ts: i64 = 0;
+        for line in stdout.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            if let Ok(ts) = trimmed.parse::<i64>() {
+                current_ts = ts;
+            } else if current_ts > 0 {
+                let days = current_ts / 86400;
+                let week_day = (days + 3) % 7;
+                let monday = days - week_day;
+                let week_key = format!("{}", monday);
+                week_files
+                    .entry(week_key)
+                    .or_default()
+                    .insert(trimmed.to_string(), true);
             }
         }
     }
@@ -293,7 +295,7 @@ fn compute_weekly_summaries(root: &Path, commits: &[CommitInfo]) -> Result<Vec<W
                 }
             }
             let mut top_modules: Vec<(String, usize)> = module_counts.into_iter().collect();
-            top_modules.sort_by(|a, b| b.1.cmp(&a.1));
+            top_modules.sort_by_key(|a| std::cmp::Reverse(a.1));
             let top_modules: Vec<String> =
                 top_modules.into_iter().take(3).map(|(m, _)| m).collect();
 
@@ -347,7 +349,7 @@ fn compute_module_activity(churn: &[FileChurn]) -> Vec<ModuleActivity> {
         })
         .collect();
 
-    activity.sort_by(|a, b| b.commit_count.cmp(&a.commit_count));
+    activity.sort_by_key(|a| std::cmp::Reverse(a.commit_count));
     activity
 }
 

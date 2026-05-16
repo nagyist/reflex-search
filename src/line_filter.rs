@@ -74,28 +74,28 @@ struct RustLineFilter;
 impl LineFilter for RustLineFilter {
     fn is_in_comment(&self, line: &str, pattern_pos: usize) -> bool {
         // Check for single-line comment: // before pattern
-        if let Some(comment_start) = line.find("//") {
-            if comment_start <= pattern_pos {
-                return true;
-            }
+        if let Some(comment_start) = line.find("//")
+            && comment_start <= pattern_pos
+        {
+            return true;
         }
 
         // Check for multi-line comment start: /* before pattern (unclosed on this line)
         // Note: We can't reliably detect multi-line comment continuations without state,
         // so we conservatively return false for those cases
-        if let Some(ml_start) = line.find("/*") {
-            if ml_start <= pattern_pos {
-                // Check if comment is closed before pattern
-                if let Some(ml_end) = line[ml_start..].find("*/") {
-                    let ml_end_pos = ml_start + ml_end + 2;
-                    if pattern_pos >= ml_end_pos {
-                        // Pattern is after comment closure
-                        return false;
-                    }
+        if let Some(ml_start) = line.find("/*")
+            && ml_start <= pattern_pos
+        {
+            // Check if comment is closed before pattern
+            if let Some(ml_end) = line[ml_start..].find("*/") {
+                let ml_end_pos = ml_start + ml_end + 2;
+                if pattern_pos >= ml_end_pos {
+                    // Pattern is after comment closure
+                    return false;
                 }
-                // Comment not closed, or pattern is inside
-                return true;
             }
+            // Comment not closed, or pattern is inside
+            return true;
         }
 
         false
@@ -105,33 +105,32 @@ impl LineFilter for RustLineFilter {
         // Rust has multiple string types: "...", r"...", r#"..."#, r##"..."##, etc.
 
         // Check for raw strings first (they don't have escape sequences)
-        if let Some(raw_start) = line.find("r#") {
-            if raw_start <= pattern_pos {
-                // Count the number of # symbols
-                let hash_count = line[raw_start + 1..]
-                    .chars()
-                    .take_while(|&c| c == '#')
-                    .count();
-                let closing = format!("\"{}#", "#".repeat(hash_count));
+        if let Some(raw_start) = line.find("r#")
+            && raw_start <= pattern_pos
+        {
+            // Count the number of # symbols
+            let hash_count = line[raw_start + 1..]
+                .chars()
+                .take_while(|&c| c == '#')
+                .count();
+            let closing = format!("\"{}#", "#".repeat(hash_count));
 
-                if let Some(raw_end) = line[raw_start..].find(&closing) {
-                    let raw_end_pos = raw_start + raw_end + closing.len();
-                    if pattern_pos < raw_end_pos {
-                        return true;
-                    }
+            if let Some(raw_end) = line[raw_start..].find(&closing) {
+                let raw_end_pos = raw_start + raw_end + closing.len();
+                if pattern_pos < raw_end_pos {
+                    return true;
                 }
             }
         }
 
         // Check for simple raw string r"..."
-        if let Some(raw_start) = line.find("r\"") {
-            if raw_start <= pattern_pos {
-                if let Some(raw_end) = line[raw_start + 2..].find('"') {
-                    let raw_end_pos = raw_start + 2 + raw_end + 1;
-                    if pattern_pos < raw_end_pos {
-                        return true;
-                    }
-                }
+        if let Some(raw_start) = line.find("r\"")
+            && raw_start <= pattern_pos
+            && let Some(raw_end) = line[raw_start + 2..].find('"')
+        {
+            let raw_end_pos = raw_start + 2 + raw_end + 1;
+            if pattern_pos < raw_end_pos {
+                return true;
             }
         }
 
@@ -169,23 +168,23 @@ struct CLineFilter;
 impl LineFilter for CLineFilter {
     fn is_in_comment(&self, line: &str, pattern_pos: usize) -> bool {
         // Check for single-line comment: // before pattern
-        if let Some(comment_start) = line.find("//") {
-            if comment_start <= pattern_pos {
-                return true;
-            }
+        if let Some(comment_start) = line.find("//")
+            && comment_start <= pattern_pos
+        {
+            return true;
         }
 
         // Check for multi-line comment: /* ... */
-        if let Some(ml_start) = line.find("/*") {
-            if ml_start <= pattern_pos {
-                if let Some(ml_end) = line[ml_start..].find("*/") {
-                    let ml_end_pos = ml_start + ml_end + 2;
-                    if pattern_pos >= ml_end_pos {
-                        return false;
-                    }
+        if let Some(ml_start) = line.find("/*")
+            && ml_start <= pattern_pos
+        {
+            if let Some(ml_end) = line[ml_start..].find("*/") {
+                let ml_end_pos = ml_start + ml_end + 2;
+                if pattern_pos >= ml_end_pos {
+                    return false;
                 }
-                return true;
             }
+            return true;
         }
 
         false
@@ -242,22 +241,22 @@ struct GoLineFilter;
 impl LineFilter for GoLineFilter {
     fn is_in_comment(&self, line: &str, pattern_pos: usize) -> bool {
         // Go comments: // and /* */
-        if let Some(comment_start) = line.find("//") {
-            if comment_start <= pattern_pos {
-                return true;
-            }
+        if let Some(comment_start) = line.find("//")
+            && comment_start <= pattern_pos
+        {
+            return true;
         }
 
-        if let Some(ml_start) = line.find("/*") {
-            if ml_start <= pattern_pos {
-                if let Some(ml_end) = line[ml_start..].find("*/") {
-                    let ml_end_pos = ml_start + ml_end + 2;
-                    if pattern_pos >= ml_end_pos {
-                        return false;
-                    }
+        if let Some(ml_start) = line.find("/*")
+            && ml_start <= pattern_pos
+        {
+            if let Some(ml_end) = line[ml_start..].find("*/") {
+                let ml_end_pos = ml_start + ml_end + 2;
+                if pattern_pos >= ml_end_pos {
+                    return false;
                 }
-                return true;
             }
+            return true;
         }
 
         false
@@ -311,22 +310,22 @@ struct JavaLineFilter;
 impl LineFilter for JavaLineFilter {
     fn is_in_comment(&self, line: &str, pattern_pos: usize) -> bool {
         // Java comments: //, /* */, /** */ (Javadoc)
-        if let Some(comment_start) = line.find("//") {
-            if comment_start <= pattern_pos {
-                return true;
-            }
+        if let Some(comment_start) = line.find("//")
+            && comment_start <= pattern_pos
+        {
+            return true;
         }
 
-        if let Some(ml_start) = line.find("/*") {
-            if ml_start <= pattern_pos {
-                if let Some(ml_end) = line[ml_start..].find("*/") {
-                    let ml_end_pos = ml_start + ml_end + 2;
-                    if pattern_pos >= ml_end_pos {
-                        return false;
-                    }
+        if let Some(ml_start) = line.find("/*")
+            && ml_start <= pattern_pos
+        {
+            if let Some(ml_end) = line[ml_start..].find("*/") {
+                let ml_end_pos = ml_start + ml_end + 2;
+                if pattern_pos >= ml_end_pos {
+                    return false;
                 }
-                return true;
             }
+            return true;
         }
 
         false
@@ -367,22 +366,22 @@ struct JavaScriptLineFilter;
 impl LineFilter for JavaScriptLineFilter {
     fn is_in_comment(&self, line: &str, pattern_pos: usize) -> bool {
         // JavaScript comments: //, /* */
-        if let Some(comment_start) = line.find("//") {
-            if comment_start <= pattern_pos {
-                return true;
-            }
+        if let Some(comment_start) = line.find("//")
+            && comment_start <= pattern_pos
+        {
+            return true;
         }
 
-        if let Some(ml_start) = line.find("/*") {
-            if ml_start <= pattern_pos {
-                if let Some(ml_end) = line[ml_start..].find("*/") {
-                    let ml_end_pos = ml_start + ml_end + 2;
-                    if pattern_pos >= ml_end_pos {
-                        return false;
-                    }
+        if let Some(ml_start) = line.find("/*")
+            && ml_start <= pattern_pos
+        {
+            if let Some(ml_end) = line[ml_start..].find("*/") {
+                let ml_end_pos = ml_start + ml_end + 2;
+                if pattern_pos >= ml_end_pos {
+                    return false;
                 }
-                return true;
             }
+            return true;
         }
 
         false
@@ -459,26 +458,25 @@ impl LineFilter for PythonLineFilter {
         // Python strings: "...", '...', """...""", '''...''', f"...", r"...", etc.
 
         // Check for triple-quoted strings first
-        if let Some(triple_double) = line.find("\"\"\"") {
-            if triple_double <= pattern_pos {
-                // Look for closing triple quote
-                if let Some(close) = line[triple_double + 3..].find("\"\"\"") {
-                    let close_pos = triple_double + 3 + close + 3;
-                    if pattern_pos < close_pos {
-                        return true;
-                    }
+        if let Some(triple_double) = line.find("\"\"\"")
+            && triple_double <= pattern_pos
+        {
+            // Look for closing triple quote
+            if let Some(close) = line[triple_double + 3..].find("\"\"\"") {
+                let close_pos = triple_double + 3 + close + 3;
+                if pattern_pos < close_pos {
+                    return true;
                 }
             }
         }
 
-        if let Some(triple_single) = line.find("'''") {
-            if triple_single <= pattern_pos {
-                if let Some(close) = line[triple_single + 3..].find("'''") {
-                    let close_pos = triple_single + 3 + close + 3;
-                    if pattern_pos < close_pos {
-                        return true;
-                    }
-                }
+        if let Some(triple_single) = line.find("'''")
+            && triple_single <= pattern_pos
+            && let Some(close) = line[triple_single + 3..].find("'''")
+        {
+            let close_pos = triple_single + 3 + close + 3;
+            if pattern_pos < close_pos {
+                return true;
             }
         }
 
@@ -519,10 +517,10 @@ impl LineFilter for RubyLineFilter {
     fn is_in_comment(&self, line: &str, pattern_pos: usize) -> bool {
         // Ruby comments: # (single line)
         // Note: Ruby also has =begin...=end multi-line comments, but those are entire-line only
-        if let Some(comment_start) = line.find('#') {
-            if comment_start <= pattern_pos {
-                return true;
-            }
+        if let Some(comment_start) = line.find('#')
+            && comment_start <= pattern_pos
+        {
+            return true;
         }
 
         false
@@ -567,30 +565,30 @@ impl LineFilter for PHPLineFilter {
     fn is_in_comment(&self, line: &str, pattern_pos: usize) -> bool {
         // PHP comments: //, #, /* */
         // Check for // comment
-        if let Some(comment_start) = line.find("//") {
-            if comment_start <= pattern_pos {
-                return true;
-            }
+        if let Some(comment_start) = line.find("//")
+            && comment_start <= pattern_pos
+        {
+            return true;
         }
 
         // Check for # comment
-        if let Some(comment_start) = line.find('#') {
-            if comment_start <= pattern_pos {
-                return true;
-            }
+        if let Some(comment_start) = line.find('#')
+            && comment_start <= pattern_pos
+        {
+            return true;
         }
 
         // Check for /* */ comment
-        if let Some(ml_start) = line.find("/*") {
-            if ml_start <= pattern_pos {
-                if let Some(ml_end) = line[ml_start..].find("*/") {
-                    let ml_end_pos = ml_start + ml_end + 2;
-                    if pattern_pos >= ml_end_pos {
-                        return false;
-                    }
+        if let Some(ml_start) = line.find("/*")
+            && ml_start <= pattern_pos
+        {
+            if let Some(ml_end) = line[ml_start..].find("*/") {
+                let ml_end_pos = ml_start + ml_end + 2;
+                if pattern_pos >= ml_end_pos {
+                    return false;
                 }
-                return true;
             }
+            return true;
         }
 
         false
@@ -633,22 +631,22 @@ struct CSharpLineFilter;
 impl LineFilter for CSharpLineFilter {
     fn is_in_comment(&self, line: &str, pattern_pos: usize) -> bool {
         // C# comments: //, /* */, /// (XML doc comments)
-        if let Some(comment_start) = line.find("//") {
-            if comment_start <= pattern_pos {
-                return true;
-            }
+        if let Some(comment_start) = line.find("//")
+            && comment_start <= pattern_pos
+        {
+            return true;
         }
 
-        if let Some(ml_start) = line.find("/*") {
-            if ml_start <= pattern_pos {
-                if let Some(ml_end) = line[ml_start..].find("*/") {
-                    let ml_end_pos = ml_start + ml_end + 2;
-                    if pattern_pos >= ml_end_pos {
-                        return false;
-                    }
+        if let Some(ml_start) = line.find("/*")
+            && ml_start <= pattern_pos
+        {
+            if let Some(ml_end) = line[ml_start..].find("*/") {
+                let ml_end_pos = ml_start + ml_end + 2;
+                if pattern_pos >= ml_end_pos {
+                    return false;
                 }
-                return true;
             }
+            return true;
         }
 
         false
@@ -658,27 +656,27 @@ impl LineFilter for CSharpLineFilter {
         // C# strings: "...", @"..." (verbatim strings)
 
         // Check for verbatim strings @"..."
-        if let Some(verbatim_start) = line.find("@\"") {
-            if verbatim_start <= pattern_pos {
-                // In verbatim strings, "" escapes to single "
-                let mut pos = verbatim_start + 2;
-                let chars: Vec<char> = line.chars().collect();
+        if let Some(verbatim_start) = line.find("@\"")
+            && verbatim_start <= pattern_pos
+        {
+            // In verbatim strings, "" escapes to single "
+            let mut pos = verbatim_start + 2;
+            let chars: Vec<char> = line.chars().collect();
 
-                while pos < chars.len() {
-                    if chars[pos] == '"' {
-                        // Check if it's escaped (double quote)
-                        if pos + 1 < chars.len() && chars[pos + 1] == '"' {
-                            pos += 2;
-                            continue;
-                        }
-                        // End of verbatim string
-                        if pattern_pos <= pos {
-                            return true;
-                        }
-                        break;
+            while pos < chars.len() {
+                if chars[pos] == '"' {
+                    // Check if it's escaped (double quote)
+                    if pos + 1 < chars.len() && chars[pos + 1] == '"' {
+                        pos += 2;
+                        continue;
                     }
-                    pos += 1;
+                    // End of verbatim string
+                    if pattern_pos <= pos {
+                        return true;
+                    }
+                    break;
                 }
+                pos += 1;
             }
         }
 
@@ -716,22 +714,22 @@ struct KotlinLineFilter;
 impl LineFilter for KotlinLineFilter {
     fn is_in_comment(&self, line: &str, pattern_pos: usize) -> bool {
         // Kotlin comments: //, /* */
-        if let Some(comment_start) = line.find("//") {
-            if comment_start <= pattern_pos {
-                return true;
-            }
+        if let Some(comment_start) = line.find("//")
+            && comment_start <= pattern_pos
+        {
+            return true;
         }
 
-        if let Some(ml_start) = line.find("/*") {
-            if ml_start <= pattern_pos {
-                if let Some(ml_end) = line[ml_start..].find("*/") {
-                    let ml_end_pos = ml_start + ml_end + 2;
-                    if pattern_pos >= ml_end_pos {
-                        return false;
-                    }
+        if let Some(ml_start) = line.find("/*")
+            && ml_start <= pattern_pos
+        {
+            if let Some(ml_end) = line[ml_start..].find("*/") {
+                let ml_end_pos = ml_start + ml_end + 2;
+                if pattern_pos >= ml_end_pos {
+                    return false;
                 }
-                return true;
             }
+            return true;
         }
 
         false
@@ -741,14 +739,13 @@ impl LineFilter for KotlinLineFilter {
         // Kotlin strings: "...", """...""" (raw strings)
 
         // Check for triple-quoted strings first
-        if let Some(triple_start) = line.find("\"\"\"") {
-            if triple_start <= pattern_pos {
-                if let Some(close) = line[triple_start + 3..].find("\"\"\"") {
-                    let close_pos = triple_start + 3 + close + 3;
-                    if pattern_pos < close_pos {
-                        return true;
-                    }
-                }
+        if let Some(triple_start) = line.find("\"\"\"")
+            && triple_start <= pattern_pos
+            && let Some(close) = line[triple_start + 3..].find("\"\"\"")
+        {
+            let close_pos = triple_start + 3 + close + 3;
+            if pattern_pos < close_pos {
+                return true;
             }
         }
 
@@ -786,10 +783,10 @@ struct ZigLineFilter;
 impl LineFilter for ZigLineFilter {
     fn is_in_comment(&self, line: &str, pattern_pos: usize) -> bool {
         // Zig comments: // and /// (doc comments)
-        if let Some(comment_start) = line.find("//") {
-            if comment_start <= pattern_pos {
-                return true;
-            }
+        if let Some(comment_start) = line.find("//")
+            && comment_start <= pattern_pos
+        {
+            return true;
         }
 
         false

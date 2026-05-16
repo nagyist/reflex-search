@@ -432,12 +432,12 @@ impl BackgroundIndexer {
             });
 
             // Write batch to cache (sequential - SQLite limitation)
-            if !parsed_results.is_empty() {
-                if let Err(e) = symbol_cache.batch_set(&parsed_results) {
-                    log::error!("Failed to write symbol batch: {}", e);
-                    let mut status = status_mutex.lock().unwrap();
-                    status.2 += parsed_results.len();
-                }
+            if !parsed_results.is_empty()
+                && let Err(e) = symbol_cache.batch_set(&parsed_results)
+            {
+                log::error!("Failed to write symbol batch: {}", e);
+                let mut status = status_mutex.lock().unwrap();
+                status.2 += parsed_results.len();
             }
 
             // Update status counters
@@ -451,10 +451,10 @@ impl BackgroundIndexer {
             }
 
             // Write status every batch
-            if processed % 500 < batch_size {
-                if let Err(e) = self.write_status() {
-                    log::warn!("Failed to write status: {}", e);
-                }
+            if processed % 500 < batch_size
+                && let Err(e) = self.write_status()
+            {
+                log::warn!("Failed to write status: {}", e);
             }
         }
 

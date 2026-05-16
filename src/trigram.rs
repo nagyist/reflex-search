@@ -377,10 +377,7 @@ impl TrigramIndex {
 
         // Group trigrams into posting lists
         for (trigram, location) in trigrams {
-            temp_map
-                .entry(trigram)
-                .or_insert_with(Vec::new)
-                .push(location);
+            temp_map.entry(trigram).or_default().push(location);
         }
 
         // Convert to sorted Vec for binary search
@@ -410,10 +407,10 @@ impl TrigramIndex {
             );
 
             // Flush final batch if temp_index is not empty
-            if let Some(ref temp_map) = self.temp_index {
-                if !temp_map.is_empty() {
-                    self.flush_batch().expect("Failed to flush final batch");
-                }
+            if let Some(ref temp_map) = self.temp_index
+                && !temp_map.is_empty()
+            {
+                self.flush_batch().expect("Failed to flush final batch");
             }
 
             // Don't merge yet - write() will handle it
@@ -603,9 +600,7 @@ impl TrigramIndex {
             let reader = &mut readers[entry.reader_id];
 
             // If this is a new trigram, write the previous one
-            if current_trigram.is_some() && current_trigram != Some(entry.trigram) {
-                // Write the accumulated posting list for current_trigram
-                let trigram = current_trigram.unwrap();
+            if let Some(trigram) = current_trigram.filter(|&t| t != entry.trigram) {
                 merged_locations.sort_unstable();
                 merged_locations.dedup();
 
@@ -642,13 +637,13 @@ impl TrigramIndex {
             merged_locations.extend_from_slice(&reader.current_posting_list);
 
             // Advance this reader to next trigram
-            if read_next_trigram(reader)? {
-                if let Some(next_trigram) = reader.current_trigram {
-                    heap.push(HeapEntry {
-                        trigram: next_trigram,
-                        reader_id: entry.reader_id,
-                    });
-                }
+            if read_next_trigram(reader)?
+                && let Some(next_trigram) = reader.current_trigram
+            {
+                heap.push(HeapEntry {
+                    trigram: next_trigram,
+                    reader_id: entry.reader_id,
+                });
             }
         }
 
@@ -855,10 +850,7 @@ impl TrigramIndex {
         // Group by trigram
         let mut index_map: HashMap<Trigram, Vec<FileLocation>> = HashMap::new();
         for (trigram, location) in all_entries {
-            index_map
-                .entry(trigram)
-                .or_insert_with(Vec::new)
-                .push(location);
+            index_map.entry(trigram).or_default().push(location);
         }
 
         // Convert to sorted vec

@@ -137,7 +137,7 @@ pub fn evaluate_results(
     }
 
     // Clamp score to [0.0, 1.0]
-    score = score.max(0.0).min(1.0);
+    score = score.clamp(0.0, 1.0);
 
     // Determine success based on score and strictness
     let success_threshold = 0.4 + (config.strictness * 0.2);

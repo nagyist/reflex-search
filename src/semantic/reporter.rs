@@ -98,6 +98,7 @@ impl ConsoleReporter {
     }
 
     /// Count lines in a string
+    #[allow(dead_code)]
     fn count_lines(text: &str) -> usize {
         if text.is_empty() {
             0
@@ -209,10 +210,10 @@ impl ConsoleReporter {
     where
         F: FnOnce() -> R,
     {
-        if let Some(ref spinner) = self.spinner {
-            if let Ok(spinner_guard) = spinner.lock() {
-                return spinner_guard.suspend(f);
-            }
+        if let Some(ref spinner) = self.spinner
+            && let Ok(spinner_guard) = spinner.lock()
+        {
+            return spinner_guard.suspend(f);
         }
         // If no spinner or lock failed, just execute the closure
         f()
@@ -344,14 +345,13 @@ impl AgenticReporter for ConsoleReporter {
         self.report_phase(3, "Query Generation");
 
         self.with_suspended_spinner(|| {
-            if self.show_reasoning {
-                if let Some(reasoning_text) = reasoning {
-                    if !reasoning_text.is_empty() {
-                        println!("\n{}", "💭 Reasoning:".dimmed());
-                        self.add_lines(2);
-                        self.display_reasoning_block(reasoning_text);
-                    }
-                }
+            if self.show_reasoning
+                && let Some(reasoning_text) = reasoning
+                && !reasoning_text.is_empty()
+            {
+                println!("\n{}", "💭 Reasoning:".dimmed());
+                self.add_lines(2);
+                self.display_reasoning_block(reasoning_text);
             }
 
             println!();

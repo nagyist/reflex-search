@@ -8,10 +8,10 @@ use crate::trigram::TrigramIndex;
 /// Find a file_id by its path string in the content store.
 pub fn find_file_id(content_reader: &ContentReader, target_path: &str) -> Option<u32> {
     for file_id in 0..content_reader.file_count() {
-        if let Some(path) = content_reader.get_file_path(file_id as u32) {
-            if path.to_string_lossy() == target_path {
-                return Some(file_id as u32);
-            }
+        if let Some(path) = content_reader.get_file_path(file_id as u32)
+            && path.to_string_lossy() == target_path
+        {
+            return Some(file_id as u32);
         }
     }
     None

@@ -540,18 +540,18 @@ fn compute_threshold_alerts(
 
     // Module size alerts
     for change in module_changes {
-        if let Some(count) = change.new_file_count {
-            if count >= thresholds.module_file_count {
-                alerts.push(ThresholdAlert {
-                    severity: AlertSeverity::Warning,
-                    category: "module_size".to_string(),
-                    message: format!(
-                        "Module has {} files (threshold: {})",
-                        count, thresholds.module_file_count
-                    ),
-                    path: Some(change.module_path.clone()),
-                });
-            }
+        if let Some(count) = change.new_file_count
+            && count >= thresholds.module_file_count
+        {
+            alerts.push(ThresholdAlert {
+                severity: AlertSeverity::Warning,
+                category: "module_size".to_string(),
+                message: format!(
+                    "Module has {} files (threshold: {})",
+                    count, thresholds.module_file_count
+                ),
+                path: Some(change.module_path.clone()),
+            });
         }
     }
 

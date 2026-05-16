@@ -187,6 +187,7 @@ pub(super) fn handle_pulse_map(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn handle_pulse_generate(
     output: PathBuf,
     base_url: String,
@@ -376,20 +377,18 @@ pub(super) fn handle_pulse_onboard(no_llm: bool, json: bool) -> Result<()> {
     )?;
     let mut data = crate::pulse::onboard::generate_onboard_structural(&cache, modules.len())?;
 
-    if !no_llm {
-        if let Ok(provider) = crate::pulse::narrate::create_pulse_provider() {
-            let llm_cache = crate::pulse::llm_cache::LlmCache::new(cache.path());
-            let ctx = crate::pulse::onboard::build_onboard_context(&data);
-            let narration = crate::pulse::narrate::narrate_section(
-                &*provider,
-                crate::pulse::narrate::onboard_system_prompt(),
-                &ctx,
-                &llm_cache,
-                "standalone",
-                "onboard-guide",
-            );
-            data.narration = narration;
-        }
+    if !no_llm && let Ok(provider) = crate::pulse::narrate::create_pulse_provider() {
+        let llm_cache = crate::pulse::llm_cache::LlmCache::new(cache.path());
+        let ctx = crate::pulse::onboard::build_onboard_context(&data);
+        let narration = crate::pulse::narrate::narrate_section(
+            &*provider,
+            crate::pulse::narrate::onboard_system_prompt(),
+            &ctx,
+            &llm_cache,
+            "standalone",
+            "onboard-guide",
+        );
+        data.narration = narration;
     }
 
     if json {

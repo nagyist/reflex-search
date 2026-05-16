@@ -1,3 +1,5 @@
+#![allow(dead_code)] // TUI refactor in progress
+
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 /// Input field state for text entry

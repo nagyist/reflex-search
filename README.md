@@ -84,7 +84,9 @@ When connected via MCP, your AI assistant gets these tools:
 | `count_occurrences` | Quick match statistics without full content |
 | `search_regex` | Regex pattern matching across the codebase |
 | `search_ast` | Structure-aware search via Tree-sitter AST queries |
+| `find_references` | Symbol definition + all usage sites in a single call; the primary code-navigation tool for AI agents |
 | `index_project` | Trigger or refresh the search index |
+| `check_index_status` | Check whether the index is fresh, stale, or missing; call before any search session or after git operations |
 | `get_dependencies` | All imports for a specific file |
 | `get_dependents` | All files that import a given file (reverse lookup) |
 | `get_transitive_deps` | Transitive dependency graph up to a configurable depth |
@@ -188,6 +190,8 @@ Full symbol extraction (functions, classes, methods, types, etc.) for 15 languag
 **Systems:** Rust, C, C++, Zig  
 **Backend:** Python, Go, Java, C#, PHP, Ruby, Kotlin  
 **Frontend:** TypeScript, JavaScript, Vue, Svelte
+
+> **Swift** is temporarily disabled (tree-sitter-swift 0.7.x grammar incompatibility). `rfx query --lang swift` emits a warning; full-text search still works.
 
 Full-text search works on **all file types** regardless of parser support.
 

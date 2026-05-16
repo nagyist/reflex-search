@@ -11,7 +11,6 @@ use reflex::trigram::{
 };
 use reflex::{CacheManager, Indexer, QueryEngine, QueryFilter};
 use std::fs;
-use std::path::PathBuf;
 use tempfile::TempDir;
 
 // ─── helpers ──────────────────────────────────────────────────────────────────

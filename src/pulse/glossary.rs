@@ -186,12 +186,10 @@ pub fn collect_glossary_evidence(cache: &CacheManager) -> Result<Option<Glossary
     if let Ok(mut stmt) = conn.prepare(
         "SELECT COALESCE(language, 'other'), COUNT(*) FROM files \
          GROUP BY language ORDER BY COUNT(*) DESC LIMIT 10",
-    ) {
-        if let Ok(rows) = stmt.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, usize>(1)?))
-        }) {
-            language_mix = rows.flatten().collect();
-        }
+    ) && let Ok(rows) = stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, usize>(1)?))
+    }) {
+        language_mix = rows.flatten().collect();
     }
 
     // Dependency edge count (best-effort; may be 0 if table absent).
@@ -205,16 +203,15 @@ pub fn collect_glossary_evidence(cache: &CacheManager) -> Result<Option<Glossary
 
     // Top hotspot files (most-imported) — good anchor hints for the LLM.
     let mut hotspot_files: Vec<String> = Vec::new();
-    if dependency_edges > 0 {
-        if let Ok(mut stmt) = conn.prepare(
+    if dependency_edges > 0
+        && let Ok(mut stmt) = conn.prepare(
             "SELECT f.path, COUNT(DISTINCT fd.file_id) as dep_count \
              FROM file_dependencies fd JOIN files f ON fd.resolved_file_id = f.id \
              GROUP BY fd.resolved_file_id ORDER BY dep_count DESC LIMIT 8",
-        ) {
-            if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
-                hotspot_files = rows.flatten().collect();
-            }
-        }
+        )
+        && let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0))
+    {
+        hotspot_files = rows.flatten().collect();
     }
 
     // Walk the symbols table once and bucket symbol names by module path.

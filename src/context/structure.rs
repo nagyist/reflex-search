@@ -175,7 +175,7 @@ fn should_exclude(path: &Path) -> bool {
         // Exclude hidden files/directories (except .gitignore, etc.)
         if name.starts_with('.') && name.len() > 1 {
             let keep_files = ["gitignore", "gitattributes", "dockerignore", "editorconfig"];
-            if !keep_files.iter().any(|f| name == &format!(".{}", f)) {
+            if !keep_files.iter().any(|f| name == format!(".{}", f)) {
                 return true;
             }
         }
@@ -209,7 +209,7 @@ fn generate_tree_json_recursive(
         .filter(|e| !should_exclude(&e.path()))
         .collect();
 
-    entries.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+    entries.sort_by_key(|a| a.file_name());
 
     let mut tree = serde_json::Map::new();
     let mut files = Vec::new();

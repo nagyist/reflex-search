@@ -130,7 +130,7 @@ fn test_index_and_symbol_search_workflow() {
     let results = engine.search("greet", filter).unwrap();
 
     // Should find definition, not call site
-    assert!(results.len() >= 1);
+    assert!(!results.is_empty());
     assert!(results.iter().all(|r| r.kind == SymbolKind::Function));
 }
 
@@ -192,7 +192,7 @@ fn test_incremental_indexing_workflow() {
         ..Default::default()
     };
     let results = engine.search("mai", filter).unwrap(); // "mai" is a trigram in "main"
-    assert!(results.len() >= 1, "Should find at least main.rs");
+    assert!(!results.is_empty(), "Should find at least main.rs");
 }
 
 #[test]
@@ -217,7 +217,7 @@ fn test_modify_file_and_reindex_workflow() {
         ..Default::default()
     };
     let results = engine.search("old", filter.clone()).unwrap();
-    assert!(results.len() >= 1);
+    assert!(!results.is_empty());
 
     // Modify file
     fs::write(&main_path, "fn new_function() {}").unwrap();
@@ -231,11 +231,11 @@ fn test_modify_file_and_reindex_workflow() {
     let cache = CacheManager::new(project);
     let engine = QueryEngine::new(cache);
     let results = engine.search("new", filter).unwrap();
-    assert!(results.len() >= 1);
+    assert!(!results.is_empty());
     assert!(
         results
             .iter()
-            .any(|r| r.symbol.as_ref().map_or(false, |s| s.contains("new")))
+            .any(|r| r.symbol.as_ref().is_some_and(|s| s.contains("new")))
     );
 }
 
@@ -329,7 +329,7 @@ fn test_combined_filters_workflow() {
     let results = engine.search("poi", filter).unwrap();
 
     // Should only find point_new in src/lib.rs
-    assert!(results.len() >= 1);
+    assert!(!results.is_empty());
     assert!(results.iter().all(|r| r.path.contains("src/")));
     assert!(results.iter().all(|r| r.kind == SymbolKind::Function));
 }
@@ -442,7 +442,7 @@ fn test_cache_persists_across_sessions() {
         let engine = QueryEngine::new(cache);
         let filter = QueryFilter::default();
         let results = engine.search("test", filter).unwrap();
-        assert!(results.len() >= 1);
+        assert!(!results.is_empty());
     }
 }
 
@@ -473,7 +473,7 @@ fn test_clear_and_rebuild_workflow() {
     let engine = QueryEngine::new(cache);
     let filter = QueryFilter::default();
     let results = engine.search("test", filter).unwrap();
-    assert!(results.len() >= 1);
+    assert!(!results.is_empty());
 }
 
 // ==================== Glob Pattern Tests ====================
@@ -506,7 +506,7 @@ fn test_glob_single_pattern() {
     let results = engine.search("extract_pattern", filter).unwrap();
 
     // Should only find results in src/
-    assert!(results.len() >= 1);
+    assert!(!results.is_empty());
     assert!(results.iter().all(|r| r.path.contains("src/")));
     assert!(results.iter().any(|r| r.path.contains("main.rs")));
     assert!(!results.iter().any(|r| r.path.contains("tests/")));
@@ -1005,7 +1005,7 @@ fn test() {
     let results = engine.search("extract", filter).unwrap();
 
     // Should find only the function definition in src/, not the call site
-    assert!(results.len() >= 1);
+    assert!(!results.is_empty());
     assert!(results.iter().all(|r| r.path.contains("src/")));
     assert!(results.iter().all(|r| r.kind == SymbolKind::Function));
 }
@@ -1741,7 +1741,7 @@ fn test_non_keyword_search_normal_mode() {
 
     // Should find function and variable, not trigger keyword mode
     // (keyword mode would only return structs)
-    assert!(results.len() >= 1);
+    assert!(!results.is_empty());
     assert!(results.iter().any(|r| r.kind == SymbolKind::Function));
 }
 
@@ -1837,12 +1837,12 @@ fn test_partial_keyword_match_normal_search() {
     let results = engine.search("struct_builder", filter).unwrap();
 
     // Should find function named struct_builder, NOT trigger keyword mode
-    assert!(results.len() >= 1);
+    assert!(!results.is_empty());
     assert!(results.iter().any(|r| r.kind == SymbolKind::Function));
     assert!(results.iter().any(|r| {
         r.symbol
             .as_ref()
-            .map_or(false, |s| s.contains("struct_builder"))
+            .is_some_and(|s| s.contains("struct_builder"))
     }));
 }
 
@@ -2269,7 +2269,7 @@ fn test_broad_query_long_pattern_allowed() {
     // Should succeed (pattern is long enough)
     assert!(result.is_ok());
     let results = result.unwrap();
-    assert!(results.len() >= 1);
+    assert!(!results.is_empty());
 }
 
 #[test]
@@ -2474,7 +2474,7 @@ fn test_broad_query_large_index_force_bypass() {
     // Should succeed (bypass the early check)
     assert!(result.is_ok());
     let results = result.unwrap();
-    assert!(results.len() >= 1); // Should find "get" in "get_data"
+    assert!(!results.is_empty()); // Should find "get" in "get_data"
 }
 
 #[test]
@@ -2506,7 +2506,7 @@ fn test_broad_query_small_index_short_pattern_allowed() {
     // Should succeed (small index allows short patterns)
     assert!(result.is_ok());
     let results = result.unwrap();
-    assert!(results.len() >= 1);
+    assert!(!results.is_empty());
 }
 
 #[test]
@@ -2570,7 +2570,7 @@ fn test_broad_query_language_filter_applied_before_check() {
     // This proves language filter was applied BEFORE broad query check
     // (Without the fix, this would error with "Query too broad - 200 files")
     assert!(
-        results.len() > 0,
+        !results.is_empty(),
         "Should find at least one symbol matching 'index' in Rust files"
     );
 }

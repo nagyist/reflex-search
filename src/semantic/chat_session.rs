@@ -382,7 +382,7 @@ impl ChatSession {
 
     /// Estimate token count from text (rough heuristic: ~4 chars per token)
     fn estimate_tokens(text: &str) -> usize {
-        (text.len() + CHARS_PER_TOKEN - 1) / CHARS_PER_TOKEN
+        text.len().div_ceil(CHARS_PER_TOKEN)
     }
 
     /// Get context window limit for a provider
@@ -470,7 +470,7 @@ mod tests {
             session.add_answer_message(format!("A{}", i));
         }
 
-        let initial_count = session.messages().len();
+        let _initial_count = session.messages().len();
         let initial_tokens = session.total_tokens();
 
         session.apply_compaction(8, "This is a summary".to_string());
@@ -488,7 +488,7 @@ mod tests {
         let text = "Hello, world!"; // 13 chars
         let tokens = ChatSession::estimate_tokens(text);
         // Uses ceiling division: (13 + 4 - 1) / 4 = 16 / 4 = 4
-        assert_eq!(tokens, (text.len() + CHARS_PER_TOKEN - 1) / CHARS_PER_TOKEN);
+        assert_eq!(tokens, text.len().div_ceil(CHARS_PER_TOKEN));
         assert_eq!(tokens, 4);
     }
 }

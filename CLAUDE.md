@@ -125,12 +125,12 @@ rfx query "(function_item) @fn" --ast --lang rust --glob "src/**/*.rs"
 
 ## Supported Languages
 
-**18 languages** with full symbol extraction support (functions, classes, variables, etc.):
+**15 languages** with full symbol extraction support (functions, classes, variables, etc.):
 
 - **Systems**: Rust, C, C++, Zig
 - **Backend**: Python, Go, Java, C#, PHP, Ruby, Kotlin
 - **Frontend**: TypeScript, JavaScript, Vue, Svelte
-- **Swift**: Temporarily disabled (tree-sitter version incompatibility)
+- **Swift**: Temporarily disabled — `rfx query --lang swift` emits a warning; full-text search still works but symbol queries return no results (tree-sitter-swift 0.7.x grammar incompatibility)
 
 **Symbol extraction**: Functions, classes, methods, variables (global + local), interfaces, traits, enums, attributes/annotations, and more.
 

@@ -141,9 +141,7 @@ impl Indexer {
                 .unwrap_or(4);
             // Use 80% of available cores (minimum 1, maximum 8)
             // Cap at 8 to prevent diminishing returns from cache contention on high-core systems
-            ((available_cores as f64 * 0.8).ceil() as usize)
-                .max(1)
-                .min(8)
+            ((available_cores as f64 * 0.8).ceil() as usize).clamp(1, 8)
         } else {
             self.config.parallel_threads
         };
@@ -417,7 +415,7 @@ impl Indexer {
                 };
 
                 // Read file content once (used for hashing, trigrams, and parsing)
-                let content = match std::fs::read_to_string(&file_path) {
+                let content = match std::fs::read_to_string(file_path) {
                     Ok(c) => c,
                     Err(e) => {
                         log::warn!("Failed to read {}: {}", path_str, e);
@@ -2007,21 +2005,22 @@ impl Indexer {
     }
 
     /// Check if a file should be indexed based on config (language + size).
+    #[allow(dead_code)]
     fn should_index(&self, path: &Path) -> bool {
         if !self.should_index_lang(path) {
             return false;
         }
 
         // Check file size limits
-        if let Ok(metadata) = std::fs::metadata(path) {
-            if metadata.len() > self.config.max_file_size as u64 {
-                log::debug!(
-                    "Skipping {} (too large: {} bytes)",
-                    path.display(),
-                    metadata.len()
-                );
-                return false;
-            }
+        if let Ok(metadata) = std::fs::metadata(path)
+            && metadata.len() > self.config.max_file_size as u64
+        {
+            log::debug!(
+                "Skipping {} (too large: {} bytes)",
+                path.display(),
+                metadata.len()
+            );
+            return false;
         }
 
         // TODO: Check include/exclude patterns when glob support is added
@@ -2059,29 +2058,28 @@ impl Indexer {
                         .arg("-k")
                         .arg(cache_path.parent().unwrap_or(root))
                         .output()
+                        && let Ok(df_output) = String::from_utf8(output.stdout)
                     {
-                        if let Ok(df_output) = String::from_utf8(output.stdout) {
-                            // Parse df output to get available KB
-                            if let Some(line) = df_output.lines().nth(1) {
-                                let parts: Vec<&str> = line.split_whitespace().collect();
-                                if parts.len() >= 4 {
-                                    if let Ok(available_kb) = parts[3].parse::<u64>() {
-                                        let available_mb = available_kb / 1024;
+                        // Parse df output to get available KB
+                        if let Some(line) = df_output.lines().nth(1) {
+                            let parts: Vec<&str> = line.split_whitespace().collect();
+                            if parts.len() >= 4
+                                && let Ok(available_kb) = parts[3].parse::<u64>()
+                            {
+                                let available_mb = available_kb / 1024;
 
-                                        // Warn if less than 100MB available
-                                        if available_mb < 100 {
-                                            log::warn!(
-                                                "Low disk space: only {}MB available. Indexing may fail.",
-                                                available_mb
-                                            );
-                                            output::warn(&format!(
-                                                "Low disk space ({}MB available). Consider freeing up space.",
-                                                available_mb
-                                            ));
-                                        } else {
-                                            log::debug!("Available disk space: {}MB", available_mb);
-                                        }
-                                    }
+                                // Warn if less than 100MB available
+                                if available_mb < 100 {
+                                    log::warn!(
+                                        "Low disk space: only {}MB available. Indexing may fail.",
+                                        available_mb
+                                    );
+                                    output::warn(&format!(
+                                        "Low disk space ({}MB available). Consider freeing up space.",
+                                        available_mb
+                                    ));
+                                } else {
+                                    log::debug!("Available disk space: {}MB", available_mb);
                                 }
                             }
                         }
@@ -2224,8 +2222,10 @@ mod tests {
         let cache = CacheManager::new(temp.path());
 
         // Config with 100 byte size limit
-        let mut config = IndexConfig::default();
-        config.max_file_size = 100;
+        let config = IndexConfig {
+            max_file_size: 100,
+            ..Default::default()
+        };
 
         let indexer = Indexer::new(cache, config);
 
@@ -2396,7 +2396,7 @@ mod tests {
         let stats = indexer.index(&project_root, false).unwrap();
 
         assert_eq!(stats.total_files, 1);
-        assert!(stats.files_by_language.get("Rust").is_some());
+        assert!(stats.files_by_language.contains_key("Rust"));
     }
 
     #[test]
@@ -2537,8 +2537,10 @@ mod tests {
         let cache = CacheManager::new(&project_root);
 
         // Test with explicit thread count
-        let mut config = IndexConfig::default();
-        config.parallel_threads = 2;
+        let config = IndexConfig {
+            parallel_threads: 2,
+            ..Default::default()
+        };
 
         let indexer = Indexer::new(cache, config);
 
@@ -2557,8 +2559,10 @@ mod tests {
         let cache = CacheManager::new(&project_root);
 
         // Test with auto thread count (0 = auto)
-        let mut config = IndexConfig::default();
-        config.parallel_threads = 0;
+        let config = IndexConfig {
+            parallel_threads: 0,
+            ..Default::default()
+        };
 
         let indexer = Indexer::new(cache, config);
 
@@ -2577,8 +2581,10 @@ mod tests {
         let cache = CacheManager::new(&project_root);
 
         // Very small size limit
-        let mut config = IndexConfig::default();
-        config.max_file_size = 50;
+        let config = IndexConfig {
+            max_file_size: 50,
+            ..Default::default()
+        };
 
         let indexer = Indexer::new(cache, config);
 

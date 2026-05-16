@@ -238,7 +238,7 @@ fn extract_variables(
         let mut decl_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             match capture_name {
                 "name" => {
                     name = Some(
@@ -248,10 +248,10 @@ fn extract_variables(
                             .unwrap_or("")
                             .to_string(),
                     );
-                    if let Some(parent) = capture.node.parent() {
-                        if parent.kind() == "variable_declarator" {
-                            declarator_node = Some(parent);
-                        }
+                    if let Some(parent) = capture.node.parent()
+                        && parent.kind() == "variable_declarator"
+                    {
+                        declarator_node = Some(parent);
                     }
                 }
                 "decl" => {
@@ -265,11 +265,11 @@ fn extract_variables(
             // Check if this is an arrow function (skip those, handled separately)
             let mut is_arrow_function = false;
             for i in 0..declarator.child_count() {
-                if let Some(child) = declarator.child(i as u32) {
-                    if child.kind() == "arrow_function" {
-                        is_arrow_function = true;
-                        break;
-                    }
+                if let Some(child) = declarator.child(i as u32)
+                    && child.kind() == "arrow_function"
+                {
+                    is_arrow_function = true;
+                    break;
                 }
             }
 
@@ -320,7 +320,7 @@ fn extract_symbols(
         let mut full_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             if capture_name == "name" {
                 name = Some(
                     capture
@@ -371,7 +371,7 @@ fn extract_preview(source: &str, span: &Span, line_offset: usize) -> String {
     let lines: Vec<&str> = source.lines().collect();
 
     // Adjust for the line offset - we're working with the script block content
-    let start_idx = (span.start_line - 1 - line_offset) as usize;
+    let start_idx = span.start_line - 1 - line_offset;
     let end_idx = (start_idx + 7).min(lines.len());
 
     lines[start_idx..end_idx].join("\n")
@@ -624,10 +624,10 @@ function process(value) {
         );
 
         // Verify that all have no scope
-        for var in variables {
+        for _var in variables {
             // Removed: scope field no longer exists: assert_eq!(var.scope, None);
         }
-        for constant in constants {
+        for _constant in constants {
             // Removed: scope field no longer exists: assert_eq!(constant.scope, None);
         }
     }

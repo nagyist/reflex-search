@@ -191,14 +191,13 @@ pub fn detect_entry_points(cache: &CacheManager) -> Result<Vec<EntryPoint>> {
                 | "pytest.ini"
                 | "setup.cfg"
         ) && path.matches('/').count() <= 1
+            && seen_paths.insert(path.clone())
         {
-            if seen_paths.insert(path.clone()) {
-                entry_points.push(EntryPoint {
-                    path: path.clone(),
-                    kind: EntryPointKind::TestRunner,
-                    key_symbols: vec![],
-                });
-            }
+            entry_points.push(EntryPoint {
+                path: path.clone(),
+                kind: EntryPointKind::TestRunner,
+                key_symbols: vec![],
+            });
         }
     }
 
@@ -307,10 +306,10 @@ pub fn compute_reading_order(
     let mut layers_map: HashMap<usize, Vec<String>> = HashMap::new();
 
     for ep in entry_points {
-        if let Some(&file_id) = path_to_id.get(&ep.path) {
-            if visited.insert(file_id) {
-                queue.push_back((file_id, 0));
-            }
+        if let Some(&file_id) = path_to_id.get(&ep.path)
+            && visited.insert(file_id)
+        {
+            queue.push_back((file_id, 0));
         }
     }
 
@@ -343,14 +342,14 @@ pub fn compute_reading_order(
 
     let mut layers: Vec<ReadingLayer> = Vec::new();
     for depth in 0..=5 {
-        if let Some(files) = layers_map.get(&depth) {
-            if !files.is_empty() {
-                layers.push(ReadingLayer {
-                    depth,
-                    label: layer_labels.get(depth).unwrap_or(&"Other").to_string(),
-                    files: files.clone(),
-                });
-            }
+        if let Some(files) = layers_map.get(&depth)
+            && !files.is_empty()
+        {
+            layers.push(ReadingLayer {
+                depth,
+                label: layer_labels.get(depth).unwrap_or(&"Other").to_string(),
+                files: files.clone(),
+            });
         }
     }
 

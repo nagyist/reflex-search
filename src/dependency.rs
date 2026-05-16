@@ -335,8 +335,9 @@ impl DependencyIndex {
                 // Use resolved_file_id directly (already populated during indexing)
                 if let Some(resolved_id) = dep.resolved_file_id {
                     // Only visit if we haven't seen it or found a shorter path
-                    if !visited.contains_key(&resolved_id) {
-                        visited.insert(resolved_id, depth + 1);
+                    if let std::collections::hash_map::Entry::Vacant(e) = visited.entry(resolved_id)
+                    {
+                        e.insert(depth + 1);
                         queue.push_back((resolved_id, depth + 1));
                     }
                 }
@@ -374,10 +375,7 @@ impl DependencyIndex {
 
         // Build adjacency list directly from resolved IDs
         for (file_id, target_id) in dependencies {
-            graph
-                .entry(file_id)
-                .or_insert_with(Vec::new)
-                .push(target_id);
+            graph.entry(file_id).or_default().push(target_id);
         }
 
         // Get all file IDs for traversal
@@ -671,14 +669,8 @@ impl DependencyIndex {
         // Build adjacency list (undirected) directly from resolved IDs
         for (file_id, target_id) in dependencies {
             // Add edge in both directions for undirected graph
-            graph
-                .entry(file_id)
-                .or_insert_with(Vec::new)
-                .push(target_id);
-            graph
-                .entry(target_id)
-                .or_insert_with(Vec::new)
-                .push(file_id);
+            graph.entry(file_id).or_default().push(target_id);
+            graph.entry(target_id).or_default().push(file_id);
         }
 
         // Get all file IDs (including isolated files with no dependencies)
@@ -686,7 +678,7 @@ impl DependencyIndex {
 
         // Ensure all files are in the graph (even if they have no edges)
         for file_id in &all_files {
-            graph.entry(*file_id).or_insert_with(Vec::new);
+            graph.entry(*file_id).or_default();
         }
 
         // Find connected components using DFS
@@ -702,7 +694,7 @@ impl DependencyIndex {
         }
 
         // Sort islands by size (largest first)
-        islands.sort_by(|a, b| b.len().cmp(&a.len()));
+        islands.sort_by_key(|a: &Vec<_>| std::cmp::Reverse(a.len()));
 
         log::info!("Found {} islands (connected components)", islands.len());
 
@@ -752,6 +744,7 @@ impl DependencyIndex {
     ///
     /// HashMap mapping imported_path to resolved file_id (only includes
     /// successfully resolved paths; external/unresolved paths are omitted)
+    #[allow(dead_code)]
     fn build_resolution_cache(&self) -> Result<HashMap<String, i64>> {
         let conn = self.open_conn()?;
 
@@ -1181,9 +1174,9 @@ pub fn resolve_rust_import(
 
     if import_path.starts_with("crate::") {
         // Start from crate root (src/lib.rs or src/main.rs)
-        let crate_root = if project_root.join("src/lib.rs").exists() {
-            project_root.join("src")
-        } else if project_root.join("src/main.rs").exists() {
+        let crate_root = if project_root.join("src/lib.rs").exists()
+            || project_root.join("src/main.rs").exists()
+        {
             project_root.join("src")
         } else {
             // Fallback to src/ directory
@@ -1199,16 +1192,16 @@ pub fn resolve_rust_import(
         resolved_path = resolve_module_path(&crate_root, &path_parts);
     } else if import_path.starts_with("super::") {
         // Go up one directory from current file's parent (the current module's parent)
-        if let Some(current_dir) = current_path.parent() {
-            if let Some(parent_dir) = current_dir.parent() {
-                let path_parts: Vec<&str> = import_path
-                    .strip_prefix("super::")
-                    .unwrap()
-                    .split("::")
-                    .collect();
+        if let Some(current_dir) = current_path.parent()
+            && let Some(parent_dir) = current_dir.parent()
+        {
+            let path_parts: Vec<&str> = import_path
+                .strip_prefix("super::")
+                .unwrap()
+                .split("::")
+                .collect();
 
-                resolved_path = resolve_module_path(parent_dir, &path_parts);
-            }
+            resolved_path = resolve_module_path(parent_dir, &path_parts);
         }
     } else if import_path.starts_with("self::") {
         // Stay in current directory

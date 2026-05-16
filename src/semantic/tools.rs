@@ -295,24 +295,23 @@ fn execute_search_documentation(
 
     // Also search .context/ directory for markdown files
     let context_dir = workspace_root.join(".context");
-    if context_dir.exists() && context_dir.is_dir() {
-        if let Ok(entries) = std::fs::read_dir(&context_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().and_then(|s| s.to_str()) == Some("md") {
-                    if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
-                        if let Ok(content) = std::fs::read_to_string(&path) {
-                            if let Some(sections) = search_documentation_content(
-                                &content,
-                                query,
-                                &format!(".context/{}", file_name),
-                            ) {
-                                found_sections.push(sections);
-                                searched_files.push(format!(".context/{}", file_name));
-                            }
-                        }
-                    }
-                }
+    if context_dir.exists()
+        && context_dir.is_dir()
+        && let Ok(entries) = std::fs::read_dir(&context_dir)
+    {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) == Some("md")
+                && let Some(file_name) = path.file_name().and_then(|n| n.to_str())
+                && let Ok(content) = std::fs::read_to_string(&path)
+                && let Some(sections) = search_documentation_content(
+                    &content,
+                    query,
+                    &format!(".context/{}", file_name),
+                )
+            {
+                found_sections.push(sections);
+                searched_files.push(format!(".context/{}", file_name));
             }
         }
     }
@@ -763,7 +762,7 @@ fn execute_find_islands(
 fn format_statistics(stats: &crate::models::IndexStats) -> String {
     let mut output = Vec::new();
 
-    output.push(format!("# Index Statistics\n"));
+    output.push("# Index Statistics\n".to_string());
     output.push(format!("Total files: {}", stats.total_files));
     output.push(format!(
         "Index size: {:.2} MB\n",
@@ -847,10 +846,10 @@ fn format_dependencies(file_path: &str, deps: &[crate::models::DependencyInfo]) 
         output.push(format!("{}. {}{}", idx + 1, dep.path, line_info));
 
         // Show imported symbols if available
-        if let Some(symbols) = &dep.symbols {
-            if !symbols.is_empty() {
-                output.push(format!("   Symbols: {}", symbols.join(", ")));
-            }
+        if let Some(symbols) = &dep.symbols
+            && !symbols.is_empty()
+        {
+            output.push(format!("   Symbols: {}", symbols.join(", ")));
         }
     }
 
@@ -930,7 +929,7 @@ fn format_islands(islands: &[Vec<String>], min_size: usize, max_size: usize) -> 
     }
 
     let mut output = Vec::new();
-    output.push(format!("# Disconnected Components (Islands)\n"));
+    output.push("# Disconnected Components (Islands)\n".to_string());
     output.push(format!(
         "Found {} islands (size {}-{}):\n",
         islands.len(),

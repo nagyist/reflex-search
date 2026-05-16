@@ -1,3 +1,5 @@
+#![allow(dead_code)] // TUI refactor in progress
+
 use ratatui::style::{Color, Style};
 use std::env;
 use syntect::highlighting::{Theme, ThemeSet};
@@ -57,16 +59,15 @@ impl ThemeManager {
     fn detect_background() -> BackgroundType {
         // Parse COLORFGBG environment variable
         // Format: "foreground;background" where 0-7=dark, 8-15=light
-        if let Ok(colorfgbg) = env::var("COLORFGBG") {
-            if let Some(bg) = colorfgbg.split(';').nth(1) {
-                if let Ok(bg_val) = bg.parse::<u8>() {
-                    return if bg_val < 8 {
-                        BackgroundType::Dark
-                    } else {
-                        BackgroundType::Light
-                    };
-                }
-            }
+        if let Ok(colorfgbg) = env::var("COLORFGBG")
+            && let Some(bg) = colorfgbg.split(';').nth(1)
+            && let Ok(bg_val) = bg.parse::<u8>()
+        {
+            return if bg_val < 8 {
+                BackgroundType::Dark
+            } else {
+                BackgroundType::Light
+            };
         }
 
         // Default to dark if unable to detect

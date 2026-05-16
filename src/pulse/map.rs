@@ -89,7 +89,7 @@ fn generate_repo_map(cache: &CacheManager, format: MapFormat) -> Result<String> 
         .into_iter()
         .map(|((s, t), c)| (s, t, c))
         .collect();
-    edges.sort_by(|a, b| b.2.cmp(&a.2));
+    edges.sort_by_key(|a| std::cmp::Reverse(a.2));
 
     // Get hotspots for highlighting
     let deps_index = DependencyIndex::new(cache.clone());
@@ -275,7 +275,7 @@ pub fn generate_layered_map(cache: &CacheManager, format: MapFormat) -> Result<S
         .into_iter()
         .map(|((s, t), c)| (s, t, c))
         .collect();
-    edges.sort_by(|a, b| b.2.cmp(&a.2));
+    edges.sort_by_key(|a| std::cmp::Reverse(a.2));
 
     let deps_index = DependencyIndex::new(cache.clone());
     let hotspots = deps_index.find_hotspots(Some(10), 5).unwrap_or_default();

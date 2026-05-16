@@ -113,10 +113,10 @@ pub fn ensure_snapshot(
     let current_fingerprint = compute_index_fingerprint(cache)?;
     let snapshots = list_snapshots(cache)?;
 
-    if let Some(latest) = snapshots.first() {
-        if latest.content_fingerprint.as_deref() == Some(&current_fingerprint) {
-            return Ok(EnsureSnapshotResult::Reused(latest.clone()));
-        }
+    if let Some(latest) = snapshots.first()
+        && latest.content_fingerprint.as_deref() == Some(&current_fingerprint)
+    {
+        return Ok(EnsureSnapshotResult::Reused(latest.clone()));
     }
 
     let info = create_snapshot(cache)?;

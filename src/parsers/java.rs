@@ -194,7 +194,7 @@ fn extract_class_methods(
         let mut method_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             match capture_name {
                 "class_name" => {
                     scope_name = Some(
@@ -297,7 +297,7 @@ fn extract_fields(
         let mut field_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             match capture_name {
                 "class_name" => {
                     scope_name = Some(
@@ -390,7 +390,7 @@ fn extract_constructors(
         let mut constructor_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             match capture_name {
                 "class_name" => {
                     class_name = Some(
@@ -473,7 +473,7 @@ fn extract_interface_methods(
         let mut method_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             match capture_name {
                 "interface_name" => {
                     interface_name = Some(
@@ -564,7 +564,7 @@ fn extract_symbols(
         let mut full_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             if capture_name == "name" {
                 name = Some(
                     capture
@@ -616,7 +616,7 @@ fn extract_preview(source: &str, span: &Span) -> String {
     let lines: Vec<&str> = source.lines().collect();
 
     // Extract 7 lines: the start line and 6 following lines
-    let start_idx = (span.start_line - 1) as usize; // Convert back to 0-indexed
+    let start_idx = span.start_line - 1; // Convert back to 0-indexed
     let end_idx = (start_idx + 7).min(lines.len());
 
     lines[start_idx..end_idx].join("\n")
@@ -680,7 +680,7 @@ public class Calculator {
         );
 
         // Check scope
-        for method in method_symbols {
+        for _method in method_symbols {
             // Removed: scope field no longer exists: assert_eq!(method.scope.as_ref().unwrap(), "class Calculator");
         }
     }
@@ -1066,13 +1066,13 @@ public class Calculator {
         );
 
         // Check scopes: field should have scope, local vars should not
-        let global_count = var_symbols
+        let _global_count = var_symbols
             .iter()
             .find(|s| s.symbol.as_deref() == Some("globalCount"))
             .unwrap();
         // Removed: scope field no longer exists: assert_eq!(global_count.scope.as_ref().unwrap(), "class Calculator");
 
-        let local_var = var_symbols
+        let _local_var = var_symbols
             .iter()
             .find(|s| s.symbol.as_deref() == Some("localVar"))
             .unwrap();
@@ -1307,7 +1307,7 @@ fn extract_java_imports(source: &str, root: &tree_sitter::Node) -> Result<Vec<Im
 
     while let Some(match_) = matches.next() {
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             if capture_name == "import_path" {
                 let path = capture
                     .node
@@ -1397,13 +1397,13 @@ fn find_gradle_package_in_file(gradle_path: &std::path::Path) -> Option<String> 
 
         // Groovy: group = 'org.neo4j'
         // Kotlin: group = "org.neo4j"
-        if trimmed.starts_with("group") {
-            if let Some(equals_idx) = trimmed.find('=') {
-                let value = &trimmed[equals_idx + 1..].trim();
-                // Remove quotes
-                let value = value.trim_matches(|c| c == '\'' || c == '"');
-                return Some(value.to_string());
-            }
+        if trimmed.starts_with("group")
+            && let Some(equals_idx) = trimmed.find('=')
+        {
+            let value = &trimmed[equals_idx + 1..].trim();
+            // Remove quotes
+            let value = value.trim_matches(|c| c == '\'' || c == '"');
+            return Some(value.to_string());
         }
     }
 
@@ -1433,23 +1433,23 @@ fn find_package_from_sources(root: &std::path::Path) -> Option<String> {
 
             if path.is_dir() {
                 walk_dir(&path, package_counts, depth + 1);
-            } else if path.extension().and_then(|s| s.to_str()) == Some("java") {
-                if let Ok(content) = std::fs::read_to_string(&path) {
-                    // Extract package declaration
-                    for line in content.lines().take(20) {
-                        // Check first 20 lines
-                        let trimmed = line.trim();
-                        if trimmed.starts_with("package ") && trimmed.ends_with(';') {
-                            let package = &trimmed[8..trimmed.len() - 1].trim();
+            } else if path.extension().and_then(|s| s.to_str()) == Some("java")
+                && let Ok(content) = std::fs::read_to_string(&path)
+            {
+                // Extract package declaration
+                for line in content.lines().take(20) {
+                    // Check first 20 lines
+                    let trimmed = line.trim();
+                    if trimmed.starts_with("package ") && trimmed.ends_with(';') {
+                        let package = &trimmed[8..trimmed.len() - 1].trim();
 
-                            // Extract base package (first 2 components: org.neo4j)
-                            let parts: Vec<&str> = package.split('.').collect();
-                            if parts.len() >= 2 {
-                                let base_package = format!("{}.{}", parts[0], parts[1]);
-                                *package_counts.entry(base_package).or_insert(0) += 1;
-                            }
-                            break;
+                        // Extract base package (first 2 components: org.neo4j)
+                        let parts: Vec<&str> = package.split('.').collect();
+                        if parts.len() >= 2 {
+                            let base_package = format!("{}.{}", parts[0], parts[1]);
+                            *package_counts.entry(base_package).or_insert(0) += 1;
                         }
+                        break;
                     }
                 }
             }
@@ -1473,10 +1473,10 @@ pub fn reclassify_java_import(import_path: &str, package_prefix: Option<&str>) -
 
 fn classify_java_import_impl(import_path: &str, package_prefix: Option<&str>) -> ImportType {
     // First check if this is an internal import (matches project package)
-    if let Some(prefix) = package_prefix {
-        if import_path.starts_with(prefix) {
-            return ImportType::Internal;
-        }
+    if let Some(prefix) = package_prefix
+        && import_path.starts_with(prefix)
+    {
+        return ImportType::Internal;
     }
 
     // Java standard library packages (common ones)
@@ -1633,12 +1633,12 @@ fn extract_package_from_config(config_path: &std::path::Path) -> Option<String> 
             let content = std::fs::read_to_string(config_path).ok()?;
             for line in content.lines() {
                 let trimmed = line.trim();
-                if trimmed.starts_with("group") {
-                    if let Some(equals_idx) = trimmed.find('=') {
-                        let value = &trimmed[equals_idx + 1..].trim();
-                        let value = value.trim_matches(|c| c == '\'' || c == '"');
-                        return Some(value.to_string());
-                    }
+                if trimmed.starts_with("group")
+                    && let Some(equals_idx) = trimmed.find('=')
+                {
+                    let value = &trimmed[equals_idx + 1..].trim();
+                    let value = value.trim_matches(|c| c == '\'' || c == '"');
+                    return Some(value.to_string());
                 }
             }
             None
@@ -1674,7 +1674,7 @@ pub fn resolve_java_import_to_path(
                 format!("{}/{}.java", project.project_root, file_path),
             ];
 
-            for candidate in candidates {
+            if let Some(candidate) = candidates.into_iter().next() {
                 log::trace!("Checking Java import path: {}", candidate);
                 return Some(candidate);
             }
@@ -1709,7 +1709,7 @@ pub fn resolve_kotlin_import_to_path(
                 format!("{}/{}.kt", project.project_root, file_path),
             ];
 
-            for candidate in candidates {
+            if let Some(candidate) = candidates.into_iter().next() {
                 log::trace!("Checking Kotlin import path: {}", candidate);
                 return Some(candidate);
             }

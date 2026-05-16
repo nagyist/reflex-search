@@ -207,7 +207,7 @@ fn extract_attributes(
         let mut full_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &def_query.capture_names()[capture.index as usize];
+            let capture_name: &str = def_query.capture_names()[capture.index as usize];
             match capture_name {
                 "name" => {
                     name = Some(
@@ -234,13 +234,13 @@ fn extract_attributes(
             if !is_attribute {
                 // Check base_list for inheritance
                 for i in 0..node.child_count() {
-                    if let Some(child) = node.child(i as u32) {
-                        if child.kind() == "base_list" {
-                            let base_text = child.utf8_text(source.as_bytes()).unwrap_or("");
-                            if base_text.contains("Attribute") {
-                                is_attribute = true;
-                                break;
-                            }
+                    if let Some(child) = node.child(i as u32)
+                        && child.kind() == "base_list"
+                    {
+                        let base_text = child.utf8_text(source.as_bytes()).unwrap_or("");
+                        if base_text.contains("Attribute") {
+                            is_attribute = true;
+                            break;
                         }
                     }
                 }
@@ -330,7 +330,7 @@ fn extract_methods(
         let mut method_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             match capture_name {
                 "class_name" => {
                     scope_name = Some(
@@ -462,7 +462,7 @@ fn extract_properties(
         let mut property_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             match capture_name {
                 "class_name" => {
                     scope_name = Some(
@@ -594,7 +594,7 @@ fn extract_events(
         let mut event_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             match capture_name {
                 "class_name" => {
                     scope_name = Some(
@@ -701,7 +701,7 @@ fn extract_indexers(
         let mut indexer_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             match capture_name {
                 "class_name" => {
                     scope_name = Some(
@@ -790,7 +790,7 @@ fn extract_symbols(
         let mut full_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             if capture_name == "name" {
                 name = Some(
                     capture
@@ -842,7 +842,7 @@ fn extract_preview(source: &str, span: &Span) -> String {
     let lines: Vec<&str> = source.lines().collect();
 
     // Extract 7 lines: the start line and 6 following lines
-    let start_idx = (span.start_line - 1) as usize; // Convert back to 0-indexed
+    let start_idx = span.start_line - 1; // Convert back to 0-indexed
     let end_idx = (start_idx + 7).min(lines.len());
 
     lines[start_idx..end_idx].join("\n")
@@ -889,7 +889,7 @@ namespace MyApp.Models
             .filter(|s| matches!(s.kind, SymbolKind::Namespace))
             .collect();
 
-        assert!(namespace_symbols.len() >= 1);
+        assert!(!namespace_symbols.is_empty());
     }
 
     #[test]
@@ -907,7 +907,7 @@ public class User { }
             .filter(|s| matches!(s.kind, SymbolKind::Namespace))
             .collect();
 
-        assert!(namespace_symbols.len() >= 1);
+        assert!(!namespace_symbols.is_empty());
     }
 
     #[test]
@@ -1028,7 +1028,7 @@ public class Calculator
         );
 
         // Check scope
-        for method in method_symbols {
+        for _method in method_symbols {
             // Removed: scope field no longer exists: assert_eq!(method.scope.as_ref().unwrap(), "class Calculator");
         }
     }
@@ -1198,12 +1198,12 @@ public class Helper
             })
             .collect();
 
-        for var in local_vars {
+        for _var in local_vars {
             // Removed: scope field no longer exists: assert_eq!(var.scope, None);
         }
 
         // Verify that class property has scope
-        let property = variables
+        let _property = variables
             .iter()
             .find(|v| v.symbol.as_deref() == Some("Multiplier"))
             .unwrap();
@@ -1250,13 +1250,13 @@ public interface INotifier
         );
 
         // Check scope
-        let click_event = event_symbols
+        let _click_event = event_symbols
             .iter()
             .find(|s| s.symbol.as_deref() == Some("Click"))
             .unwrap();
         // Removed: scope field no longer exists: assert_eq!(click_event.scope.as_ref().unwrap(), "class Button");
 
-        let notify_event = event_symbols
+        let _notify_event = event_symbols
             .iter()
             .find(|s| s.symbol.as_deref() == Some("Notify"))
             .unwrap();
@@ -1538,7 +1538,7 @@ fn extract_csharp_usings(source: &str, root: &tree_sitter::Node) -> Result<Vec<I
 
     while let Some(match_) = matches.next() {
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             if capture_name == "using_path" {
                 let path = capture
                     .node

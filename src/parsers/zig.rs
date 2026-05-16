@@ -170,7 +170,7 @@ fn extract_symbols(
         let mut full_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             if capture_name == "name" {
                 name = Some(
                     capture
@@ -222,7 +222,7 @@ fn extract_preview(source: &str, span: &Span) -> String {
     let lines: Vec<&str> = source.lines().collect();
 
     // Extract 7 lines: the start line and 6 following lines
-    let start_idx = (span.start_line - 1) as usize; // Convert back to 0-indexed
+    let start_idx = span.start_line - 1; // Convert back to 0-indexed
     let end_idx = (start_idx + 7).min(lines.len());
 
     lines[start_idx..end_idx].join("\n")
@@ -628,11 +628,11 @@ test "variable types" {
 
         // Verify that both global and local variables have no scope
         // (Zig doesn't have class-based scoping, all variables are treated equally)
-        for constant in &constants {
+        for _constant in &constants {
             // Removed: scope field no longer exists: assert_eq!(constant.scope, None);
         }
 
-        for variable in &variables {
+        for _variable in &variables {
             // Removed: scope field no longer exists: assert_eq!(variable.scope, None);
         }
     }

@@ -126,7 +126,7 @@ fn extract_methods(
         let mut method_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             match capture_name {
                 "receiver_type" => {
                     receiver_type = Some(
@@ -221,7 +221,7 @@ fn extract_variables(
         let mut decl_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             match capture_name {
                 "name" => {
                     name = Some(
@@ -277,7 +277,7 @@ fn extract_symbols(
         let mut full_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             if capture_name == "name" {
                 name = Some(
                     capture
@@ -329,7 +329,7 @@ fn extract_preview(source: &str, span: &Span) -> String {
     let lines: Vec<&str> = source.lines().collect();
 
     // Extract 7 lines: the start line and 6 following lines
-    let start_idx = (span.start_line - 1) as usize; // Convert back to 0-indexed
+    let start_idx = span.start_line - 1; // Convert back to 0-indexed
     let end_idx = (start_idx + 7).min(lines.len());
 
     lines[start_idx..end_idx].join("\n")
@@ -426,7 +426,7 @@ func (u User) SetName(name string) {
         );
 
         // Check scope
-        for method in method_symbols {
+        for _method in method_symbols {
             // Removed: scope field no longer exists: assert_eq!(method.scope.as_ref().unwrap(), "type User");
         }
     }
@@ -1098,7 +1098,7 @@ fn extract_go_imports(source: &str, root: &tree_sitter::Node) -> Result<Vec<Impo
         let mut import_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             match capture_name {
                 "import_path" => {
                     // Remove quotes from string literal
@@ -1143,7 +1143,7 @@ pub fn find_go_module_name(root: &std::path::Path) -> Option<String> {
         let trimmed = line.trim();
         if trimmed.starts_with("module ") {
             // Extract module name: "module k8s.io/kubernetes" -> "k8s.io/kubernetes"
-            let module_name = trimmed["module ".len()..].trim();
+            let module_name = trimmed.strip_prefix("module ").unwrap_or("").trim();
             return Some(module_name.to_string());
         }
     }
@@ -1171,12 +1171,12 @@ fn classify_go_import_impl(import_path: &str, module_prefix: Option<&str>) -> Im
         }
         // Also check for multi-module repos - imports starting with k8s.io/* for Kubernetes
         // Extract the domain portion and check if it matches
-        if let Some(import_domain) = import_path.split('/').next() {
-            if let Some(module_domain) = prefix.split('/').next() {
-                // If domains match (e.g., both start with k8s.io), consider it internal
-                if import_domain == module_domain && module_domain.contains('.') {
-                    return ImportType::Internal;
-                }
+        if let Some(import_domain) = import_path.split('/').next()
+            && let Some(module_domain) = prefix.split('/').next()
+        {
+            // If domains match (e.g., both start with k8s.io), consider it internal
+            if import_domain == module_domain && module_domain.contains('.') {
+                return ImportType::Internal;
             }
         }
     }
@@ -1322,7 +1322,11 @@ pub fn parse_all_go_modules(index_root: &std::path::Path) -> Result<Vec<GoModule
             for line in content.lines() {
                 let trimmed = line.trim();
                 if trimmed.starts_with("module ") {
-                    let module_name = trimmed["module ".len()..].trim().to_string();
+                    let module_name = trimmed
+                        .strip_prefix("module ")
+                        .unwrap_or("")
+                        .trim()
+                        .to_string();
 
                     let relative_project_root = project_root
                         .strip_prefix(index_root)
@@ -1386,7 +1390,7 @@ pub fn resolve_go_import_to_path(
             if sub_path.is_empty() {
                 // Importing the module root - could be multiple files
                 // Try common patterns
-                let basename = module.name.split('/').last().unwrap_or("main");
+                let basename = module.name.split('/').next_back().unwrap_or("main");
                 let candidates = if module.project_root.is_empty() {
                     vec!["main.go".to_string(), format!("{}.go", basename)]
                 } else {
@@ -1396,14 +1400,14 @@ pub fn resolve_go_import_to_path(
                     ]
                 };
 
-                for candidate in candidates {
+                if let Some(candidate) = candidates.into_iter().next() {
                     log::trace!("Checking Go module root: {}", candidate);
                     return Some(candidate);
                 }
             } else {
                 // Sub-package import
                 // Try both single file and package directory patterns
-                let package_name = sub_path.split('/').last().unwrap_or(sub_path);
+                let package_name = sub_path.split('/').next_back().unwrap_or(sub_path);
                 let candidates = if module.project_root.is_empty() {
                     vec![
                         format!("{}.go", sub_path),
@@ -1416,7 +1420,7 @@ pub fn resolve_go_import_to_path(
                     ]
                 };
 
-                for candidate in candidates {
+                if let Some(candidate) = candidates.into_iter().next() {
                     log::trace!("Checking Go package path: {}", candidate);
                     return Some(candidate);
                 }

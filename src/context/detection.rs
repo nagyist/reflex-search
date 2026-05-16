@@ -227,37 +227,37 @@ pub fn find_entry_points(root: &Path) -> Result<Vec<String>> {
 
     for (file, description) in &entry_files {
         let path = root.join(file);
-        if path.exists() {
-            if let Ok(_metadata) = fs::metadata(&path) {
-                let lines = count_lines_in_file(&path).unwrap_or(0);
-                entry_points.push(format!("- {} ({}, {} lines)", file, description, lines));
-            }
+        if path.exists()
+            && let Ok(_metadata) = fs::metadata(&path)
+        {
+            let lines = count_lines_in_file(&path).unwrap_or(0);
+            entry_points.push(format!("- {} ({}, {} lines)", file, description, lines));
         }
     }
 
     // Check for bin/ directories (Rust)
     let bin_dir = root.join("src/bin");
-    if bin_dir.exists() {
-        if let Ok(entries) = fs::read_dir(&bin_dir) {
-            for entry in entries.filter_map(|e| e.ok()) {
-                let name = entry.file_name();
-                entry_points.push(format!(
-                    "- src/bin/{} (Rust binary)",
-                    name.to_string_lossy()
-                ));
-            }
+    if bin_dir.exists()
+        && let Ok(entries) = fs::read_dir(&bin_dir)
+    {
+        for entry in entries.filter_map(|e| e.ok()) {
+            let name = entry.file_name();
+            entry_points.push(format!(
+                "- src/bin/{} (Rust binary)",
+                name.to_string_lossy()
+            ));
         }
     }
 
     // Check for cmd/ directories (Go)
     let cmd_dir = root.join("cmd");
-    if cmd_dir.exists() {
-        if let Ok(entries) = fs::read_dir(&cmd_dir) {
-            for entry in entries.filter_map(|e| e.ok()) {
-                if entry.path().is_dir() {
-                    let name = entry.file_name();
-                    entry_points.push(format!("- cmd/{} (Go binary)", name.to_string_lossy()));
-                }
+    if cmd_dir.exists()
+        && let Ok(entries) = fs::read_dir(&cmd_dir)
+    {
+        for entry in entries.filter_map(|e| e.ok()) {
+            if entry.path().is_dir() {
+                let name = entry.file_name();
+                entry_points.push(format!("- cmd/{} (Go binary)", name.to_string_lossy()));
             }
         }
     }
@@ -311,8 +311,6 @@ pub fn get_file_distribution(cache: &CacheManager) -> Result<String> {
                 "{} files ({:.1}%) - Primary language",
                 lang.file_count, lang.percentage
             )
-        } else if lang.percentage > 20.0 {
-            format!("{} files ({:.1}%)", lang.file_count, lang.percentage)
         } else {
             format!("{} files ({:.1}%)", lang.file_count, lang.percentage)
         };
@@ -450,12 +448,11 @@ fn has_inline_tests(root: &Path) -> Result<bool> {
     if let Ok(entries) = fs::read_dir(&src_dir) {
         for entry in entries.filter_map(|e| e.ok()) {
             let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) == Some("rs") {
-                if let Ok(content) = fs::read_to_string(&path) {
-                    if content.contains("#[cfg(test)]") || content.contains("#[test]") {
-                        return Ok(true);
-                    }
-                }
+            if path.extension().and_then(|e| e.to_str()) == Some("rs")
+                && let Ok(content) = fs::read_to_string(&path)
+                && (content.contains("#[cfg(test)]") || content.contains("#[test]"))
+            {
+                return Ok(true);
             }
         }
     }
@@ -773,26 +770,26 @@ fn detect_go_frameworks(root: &Path, frameworks: &mut Vec<(String, String)>) {
 fn detect_java_frameworks(root: &Path, frameworks: &mut Vec<(String, String)>) {
     // Check pom.xml
     let pom_xml = root.join("pom.xml");
-    if pom_xml.exists() {
-        if let Ok(content) = fs::read_to_string(&pom_xml) {
-            detect_java_frameworks_from_content(&content, frameworks);
-        }
+    if pom_xml.exists()
+        && let Ok(content) = fs::read_to_string(&pom_xml)
+    {
+        detect_java_frameworks_from_content(&content, frameworks);
     }
 
     // Check build.gradle
     let build_gradle = root.join("build.gradle");
-    if build_gradle.exists() {
-        if let Ok(content) = fs::read_to_string(&build_gradle) {
-            detect_java_frameworks_from_content(&content, frameworks);
-        }
+    if build_gradle.exists()
+        && let Ok(content) = fs::read_to_string(&build_gradle)
+    {
+        detect_java_frameworks_from_content(&content, frameworks);
     }
 
     // Check build.gradle.kts
     let build_gradle_kts = root.join("build.gradle.kts");
-    if build_gradle_kts.exists() {
-        if let Ok(content) = fs::read_to_string(&build_gradle_kts) {
-            detect_java_frameworks_from_content(&content, frameworks);
-        }
+    if build_gradle_kts.exists()
+        && let Ok(content) = fs::read_to_string(&build_gradle_kts)
+    {
+        detect_java_frameworks_from_content(&content, frameworks);
     }
 }
 
@@ -924,44 +921,44 @@ fn detect_kotlin_frameworks(root: &Path, frameworks: &mut Vec<(String, String)>)
 fn detect_c_cpp_frameworks(root: &Path, frameworks: &mut Vec<(String, String)>) {
     // Check CMakeLists.txt
     let cmake_lists = root.join("CMakeLists.txt");
-    if cmake_lists.exists() {
-        if let Ok(content) = fs::read_to_string(&cmake_lists) {
-            // Testing
-            if content.contains("GTest") || content.contains("gtest") {
-                frameworks.push(("Google Test".to_string(), "Testing Framework".to_string()));
-            }
-            if content.contains("Catch2") {
-                frameworks.push(("Catch2".to_string(), "Testing Framework".to_string()));
-            }
+    if cmake_lists.exists()
+        && let Ok(content) = fs::read_to_string(&cmake_lists)
+    {
+        // Testing
+        if content.contains("GTest") || content.contains("gtest") {
+            frameworks.push(("Google Test".to_string(), "Testing Framework".to_string()));
+        }
+        if content.contains("Catch2") {
+            frameworks.push(("Catch2".to_string(), "Testing Framework".to_string()));
+        }
 
-            // Libraries
-            if content.contains("Boost") {
-                frameworks.push(("Boost".to_string(), "C++ Libraries".to_string()));
-            }
+        // Libraries
+        if content.contains("Boost") {
+            frameworks.push(("Boost".to_string(), "C++ Libraries".to_string()));
+        }
 
-            // GUI
-            if content.contains("Qt") || content.contains("qt") {
-                frameworks.push(("Qt".to_string(), "GUI Framework".to_string()));
-            }
-            if content.contains("wxWidgets") {
-                frameworks.push(("wxWidgets".to_string(), "GUI Framework".to_string()));
-            }
+        // GUI
+        if content.contains("Qt") || content.contains("qt") {
+            frameworks.push(("Qt".to_string(), "GUI Framework".to_string()));
+        }
+        if content.contains("wxWidgets") {
+            frameworks.push(("wxWidgets".to_string(), "GUI Framework".to_string()));
         }
     }
 
     // Check vcpkg.json
     let vcpkg_json = root.join("vcpkg.json");
-    if vcpkg_json.exists() {
-        if let Ok(content) = fs::read_to_string(&vcpkg_json) {
-            if content.contains("\"gtest\"") {
-                frameworks.push(("Google Test".to_string(), "Testing Framework".to_string()));
-            }
-            if content.contains("\"catch2\"") {
-                frameworks.push(("Catch2".to_string(), "Testing Framework".to_string()));
-            }
-            if content.contains("\"boost\"") {
-                frameworks.push(("Boost".to_string(), "C++ Libraries".to_string()));
-            }
+    if vcpkg_json.exists()
+        && let Ok(content) = fs::read_to_string(&vcpkg_json)
+    {
+        if content.contains("\"gtest\"") {
+            frameworks.push(("Google Test".to_string(), "Testing Framework".to_string()));
+        }
+        if content.contains("\"catch2\"") {
+            frameworks.push(("Catch2".to_string(), "Testing Framework".to_string()));
+        }
+        if content.contains("\"boost\"") {
+            frameworks.push(("Boost".to_string(), "C++ Libraries".to_string()));
         }
     }
 }

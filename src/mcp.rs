@@ -56,21 +56,7 @@ struct JsonRpcError {
 
 /// Parse language string to Language enum
 fn parse_language(lang: Option<String>) -> Option<Language> {
-    lang.as_deref()
-        .and_then(|s| match s.to_lowercase().as_str() {
-            "rust" | "rs" => Some(Language::Rust),
-            "javascript" | "js" => Some(Language::JavaScript),
-            "typescript" | "ts" => Some(Language::TypeScript),
-            "vue" => Some(Language::Vue),
-            "svelte" => Some(Language::Svelte),
-            "php" => Some(Language::PHP),
-            "python" | "py" => Some(Language::Python),
-            "go" => Some(Language::Go),
-            "java" => Some(Language::Java),
-            "c" => Some(Language::C),
-            "cpp" | "c++" => Some(Language::Cpp),
-            _ => None,
-        })
+    lang.as_deref().and_then(Language::from_name)
 }
 
 /// Parse symbol kind string to SymbolKind enum
@@ -262,7 +248,7 @@ fn handle_list_tools(_params: Option<Value>) -> Result<Value> {
                         },
                         "dependencies": {
                             "type": "boolean",
-                            "description": "Include dependency information (imports) in results. **IMPORTANT:** Only extracts static imports (string literals). Dynamic imports (variables, template literals, expressions) are automatically filtered. See CLAUDE.md for details."
+                            "description": "Include dependency information (imports) in results. **IMPORTANT:** Currently only supported for Rust files — passing this with any other language (typescript, python, go, etc.) will produce no dependency data. Only extracts static imports (string literals); dynamic imports are filtered. See CLAUDE.md for details."
                         },
                         "preview_length": {
                             "type": "integer",
@@ -858,7 +844,20 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 .map(|n| n as usize)
                 .unwrap_or(DEFAULT_MCP_PREVIEW_LENGTH);
 
-            let language = parse_language(lang);
+            let language = parse_language(lang.clone());
+
+            // Build warning for unsupported language + dependencies combination (REF-171)
+            let deps_lang_warning: Option<String> =
+                if dependencies && matches!(language, Some(l) if l != Language::Rust) {
+                    Some(format!(
+                        "Warning: dependencies is currently only supported for Rust files. \
+                         No dependency data will be included for {} files.",
+                        lang.as_deref().unwrap_or("non-Rust")
+                    ))
+                } else {
+                    None
+                };
+
             let parsed_kind = parse_symbol_kind(kind);
             let symbols_mode = symbols.unwrap_or(false) || parsed_kind.is_some();
 
@@ -925,6 +924,14 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 !glob_patterns.is_empty(),
                 exact.unwrap_or(false),
             );
+
+            // Prepend language limitation warning to AI instruction (REF-171)
+            if let Some(warn) = deps_lang_warning {
+                response.ai_instruction = Some(match response.ai_instruction.take() {
+                    Some(existing) => format!("{warn}\n\n{existing}"),
+                    None => warn,
+                });
+            }
 
             Ok(json!({
                 "content": [{
@@ -1284,11 +1291,11 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
             match sort_order {
                 "asc" => {
                     // Ascending: least imports first
-                    all_hotspots.sort_by(|a, b| a.1.cmp(&b.1));
+                    all_hotspots.sort_by_key(|a| a.1);
                 }
                 "desc" => {
                     // Descending: most imports first (default)
-                    all_hotspots.sort_by(|a, b| b.1.cmp(&a.1));
+                    all_hotspots.sort_by_key(|a| std::cmp::Reverse(a.1));
                 }
                 _ => {
                     return Err(anyhow::anyhow!(
@@ -1488,7 +1495,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
             let total_components = all_islands.len();
 
             // Get total file count for percentage calculation
-            let total_files = deps_index.get_cache().stats()?.total_files as usize;
+            let total_files = deps_index.get_cache().stats()?.total_files;
 
             // Calculate max_island_size default: min of 500 or 50% of total files
             let max_size = max_island_size.unwrap_or_else(|| {

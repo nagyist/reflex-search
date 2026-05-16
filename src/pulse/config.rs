@@ -8,21 +8,12 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 /// Top-level Pulse configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PulseConfig {
     #[serde(default)]
     pub retention: RetentionConfig,
     #[serde(default)]
     pub thresholds: ThresholdConfig,
-}
-
-impl Default for PulseConfig {
-    fn default() -> Self {
-        Self {
-            retention: RetentionConfig::default(),
-            thresholds: ThresholdConfig::default(),
-        }
-    }
 }
 
 /// Snapshot retention policy

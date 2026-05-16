@@ -39,9 +39,8 @@ jobs:
       - name: Check formatting
         run: cargo fmt --check
 
-      # TODO(REF-12): upgrade to -D warnings once clippy cleanup is complete.
       - name: Clippy
-        run: cargo clippy --all-targets
+        run: cargo clippy --all-targets -- -D warnings
 
       - name: Run tests
         run: cargo test --all

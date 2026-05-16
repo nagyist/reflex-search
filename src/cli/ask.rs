@@ -5,6 +5,7 @@ use owo_colors::OwoColorize;
 use std::sync::{Arc, Mutex};
 
 /// Handle the `ask` command
+#[allow(clippy::too_many_arguments)]
 pub(super) fn handle_ask(
     question: Option<String>,
     auto_execute: bool,

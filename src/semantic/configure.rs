@@ -125,6 +125,12 @@ pub struct ConfigWizard {
     existing_compatible_model: Option<String>,
 }
 
+impl Default for ConfigWizard {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ConfigWizard {
     pub fn new() -> Self {
         Self {
@@ -257,15 +263,13 @@ impl ConfigWizard {
     /// Handle keys for provider selection screen
     fn handle_provider_selection_key(&mut self, key: KeyEvent) -> Result<bool> {
         match key.code {
-            KeyCode::Up | KeyCode::Char('k') => {
-                if self.selected_provider_idx > 0 {
-                    self.selected_provider_idx -= 1;
-                }
+            KeyCode::Up | KeyCode::Char('k') if self.selected_provider_idx > 0 => {
+                self.selected_provider_idx -= 1;
             }
-            KeyCode::Down | KeyCode::Char('j') => {
-                if self.selected_provider_idx < PROVIDERS.len() - 1 {
-                    self.selected_provider_idx += 1;
-                }
+            KeyCode::Down | KeyCode::Char('j')
+                if self.selected_provider_idx < PROVIDERS.len() - 1 =>
+            {
+                self.selected_provider_idx += 1;
             }
             KeyCode::Enter => {
                 // Check if API key already exists for this provider
@@ -303,26 +307,18 @@ impl ConfigWizard {
                 self.base_url.insert(self.base_url_cursor, c);
                 self.base_url_cursor += 1;
             }
-            KeyCode::Backspace => {
-                if self.base_url_cursor > 0 {
-                    self.base_url_cursor -= 1;
-                    self.base_url.remove(self.base_url_cursor);
-                }
+            KeyCode::Backspace if self.base_url_cursor > 0 => {
+                self.base_url_cursor -= 1;
+                self.base_url.remove(self.base_url_cursor);
             }
-            KeyCode::Delete => {
-                if self.base_url_cursor < self.base_url.len() {
-                    self.base_url.remove(self.base_url_cursor);
-                }
+            KeyCode::Delete if self.base_url_cursor < self.base_url.len() => {
+                self.base_url.remove(self.base_url_cursor);
             }
-            KeyCode::Left => {
-                if self.base_url_cursor > 0 {
-                    self.base_url_cursor -= 1;
-                }
+            KeyCode::Left if self.base_url_cursor > 0 => {
+                self.base_url_cursor -= 1;
             }
-            KeyCode::Right => {
-                if self.base_url_cursor < self.base_url.len() {
-                    self.base_url_cursor += 1;
-                }
+            KeyCode::Right if self.base_url_cursor < self.base_url.len() => {
+                self.base_url_cursor += 1;
             }
             KeyCode::Home => {
                 self.base_url_cursor = 0;
@@ -362,26 +358,18 @@ impl ConfigWizard {
                 self.api_key.insert(self.api_key_cursor, c);
                 self.api_key_cursor += 1;
             }
-            KeyCode::Backspace => {
-                if self.api_key_cursor > 0 {
-                    self.api_key_cursor -= 1;
-                    self.api_key.remove(self.api_key_cursor);
-                }
+            KeyCode::Backspace if self.api_key_cursor > 0 => {
+                self.api_key_cursor -= 1;
+                self.api_key.remove(self.api_key_cursor);
             }
-            KeyCode::Delete => {
-                if self.api_key_cursor < self.api_key.len() {
-                    self.api_key.remove(self.api_key_cursor);
-                }
+            KeyCode::Delete if self.api_key_cursor < self.api_key.len() => {
+                self.api_key.remove(self.api_key_cursor);
             }
-            KeyCode::Left => {
-                if self.api_key_cursor > 0 {
-                    self.api_key_cursor -= 1;
-                }
+            KeyCode::Left if self.api_key_cursor > 0 => {
+                self.api_key_cursor -= 1;
             }
-            KeyCode::Right => {
-                if self.api_key_cursor < self.api_key.len() {
-                    self.api_key_cursor += 1;
-                }
+            KeyCode::Right if self.api_key_cursor < self.api_key.len() => {
+                self.api_key_cursor += 1;
             }
             KeyCode::Home => {
                 self.api_key_cursor = 0;
@@ -445,27 +433,23 @@ impl ConfigWizard {
         let model_count = self.filtered_model_ids().len();
 
         match key.code {
-            KeyCode::Up => {
-                if self.selected_model_idx > 0 {
-                    self.selected_model_idx -= 1;
-                }
+            KeyCode::Up if self.selected_model_idx > 0 => {
+                self.selected_model_idx -= 1;
             }
-            KeyCode::Down => {
-                if model_count > 0 && self.selected_model_idx < model_count - 1 {
-                    self.selected_model_idx += 1;
-                }
+            KeyCode::Down if model_count > 0 && self.selected_model_idx < model_count - 1 => {
+                self.selected_model_idx += 1;
             }
             // j/k vim navigation only works when typing-to-filter is disabled,
             // otherwise those characters would always be swallowed as filter input.
-            KeyCode::Char('k') if !supports_filter => {
-                if self.selected_model_idx > 0 {
-                    self.selected_model_idx -= 1;
-                }
+            KeyCode::Char('k') if !supports_filter && self.selected_model_idx > 0 => {
+                self.selected_model_idx -= 1;
             }
-            KeyCode::Char('j') if !supports_filter => {
-                if model_count > 0 && self.selected_model_idx < model_count - 1 {
-                    self.selected_model_idx += 1;
-                }
+            KeyCode::Char('j')
+                if !supports_filter
+                    && model_count > 0
+                    && self.selected_model_idx < model_count - 1 =>
+            {
+                self.selected_model_idx += 1;
             }
             KeyCode::Char(c)
                 if supports_filter && !key.modifiers.contains(KeyModifiers::CONTROL) =>
@@ -505,26 +489,18 @@ impl ConfigWizard {
                 self.model_text.insert(self.model_text_cursor, c);
                 self.model_text_cursor += 1;
             }
-            KeyCode::Backspace => {
-                if self.model_text_cursor > 0 {
-                    self.model_text_cursor -= 1;
-                    self.model_text.remove(self.model_text_cursor);
-                }
+            KeyCode::Backspace if self.model_text_cursor > 0 => {
+                self.model_text_cursor -= 1;
+                self.model_text.remove(self.model_text_cursor);
             }
-            KeyCode::Delete => {
-                if self.model_text_cursor < self.model_text.len() {
-                    self.model_text.remove(self.model_text_cursor);
-                }
+            KeyCode::Delete if self.model_text_cursor < self.model_text.len() => {
+                self.model_text.remove(self.model_text_cursor);
             }
-            KeyCode::Left => {
-                if self.model_text_cursor > 0 {
-                    self.model_text_cursor -= 1;
-                }
+            KeyCode::Left if self.model_text_cursor > 0 => {
+                self.model_text_cursor -= 1;
             }
-            KeyCode::Right => {
-                if self.model_text_cursor < self.model_text.len() {
-                    self.model_text_cursor += 1;
-                }
+            KeyCode::Right if self.model_text_cursor < self.model_text.len() => {
+                self.model_text_cursor += 1;
             }
             KeyCode::Home => {
                 self.model_text_cursor = 0;
@@ -552,15 +528,13 @@ impl ConfigWizard {
     /// Handle keys for sort strategy selection screen (OpenRouter only)
     fn handle_sort_strategy_key(&mut self, key: KeyEvent) -> Result<bool> {
         match key.code {
-            KeyCode::Up | KeyCode::Char('k') => {
-                if self.selected_sort_idx > 0 {
-                    self.selected_sort_idx -= 1;
-                }
+            KeyCode::Up | KeyCode::Char('k') if self.selected_sort_idx > 0 => {
+                self.selected_sort_idx -= 1;
             }
-            KeyCode::Down | KeyCode::Char('j') => {
-                if self.selected_sort_idx < OPENROUTER_SORT_STRATEGIES.len() - 1 {
-                    self.selected_sort_idx += 1;
-                }
+            KeyCode::Down | KeyCode::Char('j')
+                if self.selected_sort_idx < OPENROUTER_SORT_STRATEGIES.len() - 1 =>
+            {
+                self.selected_sort_idx += 1;
             }
             KeyCode::Enter => {
                 self.screen = WizardScreen::ConnectivityTest;
@@ -1391,12 +1365,12 @@ fn run_wizard_loop(
         }
 
         // Handle keyboard input
-        if event::poll(std::time::Duration::from_millis(100))? {
-            if let Event::Key(key) = event::read()? {
-                let should_exit = wizard.handle_key(key)?;
-                if should_exit {
-                    break;
-                }
+        if event::poll(std::time::Duration::from_millis(100))?
+            && let Event::Key(key) = event::read()?
+        {
+            let should_exit = wizard.handle_key(key)?;
+            if should_exit {
+                break;
             }
         }
     }

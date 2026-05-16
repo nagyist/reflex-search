@@ -207,16 +207,17 @@ fn extract_top_level_dirs(paths: &[String]) -> Vec<String> {
     let mut dir_counts: HashMap<String, usize> = HashMap::new();
 
     for path in paths {
-        if let Some(first_segment) = path.split('/').next() {
-            if !first_segment.is_empty() && !first_segment.starts_with('.') {
-                *dir_counts.entry(first_segment.to_string()).or_insert(0) += 1;
-            }
+        if let Some(first_segment) = path.split('/').next()
+            && !first_segment.is_empty()
+            && !first_segment.starts_with('.')
+        {
+            *dir_counts.entry(first_segment.to_string()).or_insert(0) += 1;
         }
     }
 
     // Return top directories sorted by count (descending)
     let mut dirs: Vec<(String, usize)> = dir_counts.into_iter().collect();
-    dirs.sort_by(|a, b| b.1.cmp(&a.1));
+    dirs.sort_by_key(|a| std::cmp::Reverse(a.1));
 
     // Return top 10 directories with trailing slash
     dirs.into_iter()
@@ -261,7 +262,7 @@ fn extract_common_paths(paths: &[String], min_depth: usize, max_results: usize) 
         .collect();
 
     // Sort by count descending
-    common_paths.sort_by(|a, b| b.1.cmp(&a.1));
+    common_paths.sort_by_key(|a| std::cmp::Reverse(a.1));
 
     // Return top paths with trailing slash
     common_paths

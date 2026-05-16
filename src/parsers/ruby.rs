@@ -141,7 +141,7 @@ fn extract_methods(
         let mut method_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             match capture_name {
                 "class_name" => {
                     scope_name = Some(
@@ -233,7 +233,7 @@ fn extract_singleton_methods(
         let mut method_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             match capture_name {
                 "class_name" => {
                     class_name = Some(
@@ -322,7 +322,7 @@ fn extract_local_variables(
         let mut assignment_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             match capture_name {
                 "name" => {
                     name = Some(
@@ -499,7 +499,7 @@ fn extract_attr_accessors(
         let mut call_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             match capture_name {
                 "method_type" => {
                     method_type = Some(
@@ -567,7 +567,7 @@ fn extract_symbols(
         let mut full_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             if capture_name == "name" {
                 name = Some(
                     capture
@@ -619,7 +619,7 @@ fn extract_preview(source: &str, span: &Span) -> String {
     let lines: Vec<&str> = source.lines().collect();
 
     // Extract 7 lines: the start line and 6 following lines
-    let start_idx = (span.start_line - 1) as usize; // Convert back to 0-indexed
+    let start_idx = span.start_line - 1; // Convert back to 0-indexed
     let end_idx = (start_idx + 7).min(lines.len());
 
     lines[start_idx..end_idx].join("\n")
@@ -667,7 +667,7 @@ impl DependencyExtractor for RubyDependencyExtractor {
             let mut args_node = None;
 
             for capture in match_.captures {
-                let capture_name: &str = &query.capture_names()[capture.index as usize];
+                let capture_name: &str = query.capture_names()[capture.index as usize];
                 match capture_name {
                     "method_name" => {
                         method_name = Some(
@@ -809,10 +809,8 @@ pub fn find_all_gemspec_files(root: &std::path::Path) -> Result<Vec<std::path::P
     for entry in walker {
         let entry = entry?;
         let path = entry.path();
-        if path.is_file() {
-            if path.extension().and_then(|s| s.to_str()) == Some("gemspec") {
-                gemspec_files.push(path.to_path_buf());
-            }
+        if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("gemspec") {
+            gemspec_files.push(path.to_path_buf());
         }
     }
 
@@ -826,21 +824,21 @@ pub fn parse_all_ruby_projects(root: &std::path::Path) -> Result<Vec<RubyProject
     let root_abs = root.canonicalize()?;
 
     for gemspec_path in &gemspec_files {
-        if let Some(project_dir) = gemspec_path.parent() {
-            if let Some(gem_name) = parse_gemspec_name(gemspec_path) {
-                let project_abs = project_dir.canonicalize()?;
-                let project_rel = project_abs
-                    .strip_prefix(&root_abs)
-                    .unwrap_or(project_dir)
-                    .to_string_lossy()
-                    .to_string();
+        if let Some(project_dir) = gemspec_path.parent()
+            && let Some(gem_name) = parse_gemspec_name(gemspec_path)
+        {
+            let project_abs = project_dir.canonicalize()?;
+            let project_rel = project_abs
+                .strip_prefix(&root_abs)
+                .unwrap_or(project_dir)
+                .to_string_lossy()
+                .to_string();
 
-                projects.push(RubyProject {
-                    gem_name: gem_name.clone(),
-                    project_root: project_rel,
-                    abs_project_root: project_abs.to_string_lossy().to_string(),
-                });
-            }
+            projects.push(RubyProject {
+                gem_name: gem_name.clone(),
+                project_root: project_rel,
+                abs_project_root: project_abs.to_string_lossy().to_string(),
+            });
         }
     }
 
@@ -875,11 +873,11 @@ fn parse_gemspec_name(gemspec_path: &std::path::Path) -> Option<String> {
 
                 // Handle both "name" and 'name'
                 for quote in ['"', '\''] {
-                    if let Some(start) = after_equals.find(quote) {
-                        if let Some(end) = after_equals[start + 1..].find(quote) {
-                            let name = &after_equals[start + 1..start + 1 + end];
-                            return Some(name.to_string());
-                        }
+                    if let Some(start) = after_equals.find(quote)
+                        && let Some(end) = after_equals[start + 1..].find(quote)
+                    {
+                        let name = &after_equals[start + 1..start + 1 + end];
+                        return Some(name.to_string());
                     }
                 }
             }
@@ -960,7 +958,7 @@ pub fn resolve_ruby_require_to_path(
                     format!("{}/{}.rb", project.project_root, require_file_path),
                 ];
 
-                for candidate in candidates {
+                if let Some(candidate) = candidates.into_iter().next() {
                     return Some(candidate);
                 }
             }
@@ -1152,7 +1150,7 @@ end
         );
 
         // Check scope
-        for method in method_symbols {
+        for _method in method_symbols {
             // Removed: scope field no longer exists: assert_eq!(method.scope.as_ref().unwrap(), "class Calculator");
         }
     }
@@ -1174,7 +1172,7 @@ end
             .filter(|s| matches!(s.kind, SymbolKind::Method))
             .collect();
 
-        assert!(method_symbols.len() >= 1);
+        assert!(!method_symbols.is_empty());
         assert!(
             method_symbols
                 .iter()
@@ -1384,7 +1382,7 @@ end
         );
 
         // Verify that local variables have no scope
-        for var in variables {
+        for _var in variables {
             // Removed: scope field no longer exists: assert_eq!(var.scope, None);
         }
 

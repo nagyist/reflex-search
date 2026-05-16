@@ -153,7 +153,7 @@ fn extract_attributes(
         let mut class_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &def_query.capture_names()[capture.index as usize];
+            let capture_name: &str = def_query.capture_names()[capture.index as usize];
             match capture_name {
                 "name" => {
                     name = Some(
@@ -255,7 +255,7 @@ fn extract_methods(
         let mut method_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             match capture_name {
                 "class_name" => {
                     scope_name = Some(
@@ -369,7 +369,7 @@ fn extract_properties(
         let mut prop_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             match capture_name {
                 "class_name" => {
                     scope_name = Some(
@@ -459,7 +459,7 @@ fn extract_local_variables(
         let mut assignment_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             match capture_name {
                 "name" => {
                     name = Some(
@@ -567,7 +567,7 @@ fn extract_symbols(
         let mut full_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             if capture_name == "name" {
                 name = Some(
                     capture
@@ -637,7 +637,7 @@ fn extract_preview(source: &str, span: &Span) -> String {
     let lines: Vec<&str> = source.lines().collect();
 
     // Extract 7 lines: the start line and 6 following lines
-    let start_idx = (span.start_line - 1) as usize; // Convert back to 0-indexed
+    let start_idx = span.start_line - 1; // Convert back to 0-indexed
     let end_idx = (start_idx + 7).min(lines.len());
 
     lines[start_idx..end_idx].join("\n")
@@ -727,7 +727,7 @@ mod tests {
         );
 
         // Check scope
-        for method in method_symbols {
+        for _method in method_symbols {
             // Removed: scope field no longer exists: assert_eq!(method.scope.as_ref().unwrap(), "class Calculator");
         }
     }
@@ -1015,12 +1015,12 @@ mod tests {
             })
             .collect();
 
-        for var in local_vars {
+        for _var in local_vars {
             // Removed: scope field no longer exists: assert_eq!(var.scope, None);
         }
 
         // Verify that class property has scope
-        let property = variables
+        let _property = variables
             .iter()
             .find(|v| v.symbol.as_deref() == Some("value"))
             .unwrap();
@@ -1350,7 +1350,7 @@ fn extract_php_uses(source: &str, root: &tree_sitter::Node) -> Result<Vec<Import
 
     while let Some(match_) = matches.next() {
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             if capture_name == "use_path" {
                 let path = capture
                     .node
@@ -1409,7 +1409,7 @@ fn extract_php_requires(source: &str, root: &tree_sitter::Node) -> Result<Vec<Im
         let mut require_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             match capture_name {
                 "require_path" => {
                     let raw_path = capture.node.utf8_text(source.as_bytes()).unwrap_or("");
@@ -1616,35 +1616,34 @@ pub fn parse_composer_psr4(project_root: &Path) -> Result<Vec<Psr4Mapping>> {
     let mut mappings = Vec::new();
 
     // Extract PSR-4 mappings from autoload section
-    if let Some(autoload) = json.get("autoload") {
-        if let Some(psr4) = autoload.get("psr-4") {
-            if let Some(psr4_obj) = psr4.as_object() {
-                for (namespace, path) in psr4_obj {
-                    // path can be a string or array of strings
-                    let directories = match path {
-                        serde_json::Value::String(s) => vec![s.clone()],
-                        serde_json::Value::Array(arr) => arr
-                            .iter()
-                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                            .collect(),
-                        _ => continue,
-                    };
+    if let Some(autoload) = json.get("autoload")
+        && let Some(psr4) = autoload.get("psr-4")
+        && let Some(psr4_obj) = psr4.as_object()
+    {
+        for (namespace, path) in psr4_obj {
+            // path can be a string or array of strings
+            let directories = match path {
+                serde_json::Value::String(s) => vec![s.clone()],
+                serde_json::Value::Array(arr) => arr
+                    .iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect(),
+                _ => continue,
+            };
 
-                    for dir in directories {
-                        mappings.push(Psr4Mapping {
-                            namespace_prefix: namespace.clone(),
-                            directory: dir,
-                            project_root: String::new(), // Empty for single-project use
-                        });
-                    }
-                }
+            for dir in directories {
+                mappings.push(Psr4Mapping {
+                    namespace_prefix: namespace.clone(),
+                    directory: dir,
+                    project_root: String::new(), // Empty for single-project use
+                });
             }
         }
     }
 
     // Sort by namespace length (longest first) for correct matching
     // Example: "App\\Http\\" should match before "App\\"
-    mappings.sort_by(|a, b| b.namespace_prefix.len().cmp(&a.namespace_prefix.len()));
+    mappings.sort_by_key(|a| std::cmp::Reverse(a.namespace_prefix.len()));
 
     log::debug!(
         "Loaded {} PSR-4 mappings from composer.json",
@@ -1743,7 +1742,7 @@ pub fn parse_all_composer_psr4(index_root: &Path) -> Result<Vec<Psr4Mapping>> {
     }
 
     // Sort by namespace length (longest first) for correct matching
-    all_mappings.sort_by(|a, b| b.namespace_prefix.len().cmp(&a.namespace_prefix.len()));
+    all_mappings.sort_by_key(|a| std::cmp::Reverse(a.namespace_prefix.len()));
 
     log::info!(
         "Loaded {} total PSR-4 mappings from {} projects",

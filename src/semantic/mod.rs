@@ -142,38 +142,38 @@ pub(crate) fn extract_json(text: &str) -> &str {
     }
 
     // If it doesn't start with `{`, try to find JSON embedded in text
-    if !trimmed.starts_with('{') {
-        if let Some(start) = trimmed.find('{') {
-            // Find the matching closing brace by counting depth
-            let bytes = trimmed.as_bytes();
-            let mut depth = 0i32;
-            let mut last_close = start;
-            let mut in_string = false;
-            let mut escape_next = false;
+    if !trimmed.starts_with('{')
+        && let Some(start) = trimmed.find('{')
+    {
+        // Find the matching closing brace by counting depth
+        let bytes = trimmed.as_bytes();
+        let mut depth = 0i32;
+        let mut last_close = start;
+        let mut in_string = false;
+        let mut escape_next = false;
 
-            for (i, &b) in bytes[start..].iter().enumerate() {
-                if escape_next {
-                    escape_next = false;
-                    continue;
-                }
-                match b {
-                    b'\\' if in_string => escape_next = true,
-                    b'"' => in_string = !in_string,
-                    b'{' if !in_string => depth += 1,
-                    b'}' if !in_string => {
-                        depth -= 1;
-                        if depth == 0 {
-                            last_close = start + i;
-                            break;
-                        }
+        for (i, &b) in bytes[start..].iter().enumerate() {
+            if escape_next {
+                escape_next = false;
+                continue;
+            }
+            match b {
+                b'\\' if in_string => escape_next = true,
+                b'"' => in_string = !in_string,
+                b'{' if !in_string => depth += 1,
+                b'}' if !in_string => {
+                    depth -= 1;
+                    if depth == 0 {
+                        last_close = start + i;
+                        break;
                     }
-                    _ => {}
                 }
+                _ => {}
             }
+        }
 
-            if depth == 0 && last_close > start {
-                return trimmed[start..=last_close].trim();
-            }
+        if depth == 0 && last_close > start {
+            return trimmed[start..=last_close].trim();
         }
     }
 
@@ -441,8 +441,7 @@ Some trailing text here."#;
 
     #[test]
     fn test_module_structure() {
-        // Just verify the module compiles
-        assert!(true);
+        // Just verify the module compiles (no-op assertion removed)
     }
 
     #[test]

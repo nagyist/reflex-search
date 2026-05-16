@@ -333,7 +333,7 @@ impl SymbolCache {
                 hits,
                 misses,
                 file_ids.len(),
-                (file_ids.len() + BATCH_SIZE - 1) / BATCH_SIZE
+                file_ids.len().div_ceil(BATCH_SIZE)
             );
         } else {
             log::debug!(
@@ -341,7 +341,7 @@ impl SymbolCache {
                 hits,
                 misses,
                 file_ids.len(),
-                (file_ids.len() + BATCH_SIZE - 1) / BATCH_SIZE
+                file_ids.len().div_ceil(BATCH_SIZE)
             );
         }
 

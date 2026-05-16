@@ -107,21 +107,21 @@ impl Default for SemanticConfig {
 ///
 /// This enables CI/headless usage where there's no ~/.reflex/config.toml.
 fn apply_env_overrides(mut config: SemanticConfig) -> SemanticConfig {
-    if let Ok(provider) = env::var("REFLEX_PROVIDER") {
-        if !provider.is_empty() {
-            log::debug!(
-                "Overriding provider from REFLEX_PROVIDER env var: {}",
-                provider
-            );
-            config.provider = provider;
-        }
+    if let Ok(provider) = env::var("REFLEX_PROVIDER")
+        && !provider.is_empty()
+    {
+        log::debug!(
+            "Overriding provider from REFLEX_PROVIDER env var: {}",
+            provider
+        );
+        config.provider = provider;
     }
 
-    if let Ok(model) = env::var("REFLEX_MODEL") {
-        if !model.is_empty() {
-            log::debug!("Overriding model from REFLEX_MODEL env var: {}", model);
-            config.model = Some(model);
-        }
+    if let Ok(model) = env::var("REFLEX_MODEL")
+        && !model.is_empty()
+    {
+        log::debug!("Overriding model from REFLEX_MODEL env var: {}", model);
+        config.model = Some(model);
     }
 
     if let Ok(val) = env::var("REFLEX_LLM_TIMEOUT_SECONDS") {
@@ -286,35 +286,35 @@ pub fn get_api_key(provider: &str) -> Result<String> {
         provider_lc == "openai-compatible" || provider_lc == "openai_compatible";
 
     // First check user config file
-    if let Ok(Some(user_config)) = load_user_config() {
-        if let Some(credentials) = &user_config.credentials {
-            // Get the appropriate key based on provider
-            let key = match provider_lc.as_str() {
-                "openai" => credentials.openai_api_key.as_ref(),
-                "anthropic" => credentials.anthropic_api_key.as_ref(),
-                "openrouter" => credentials.openrouter_api_key.as_ref(),
-                "openai-compatible" | "openai_compatible" => {
-                    credentials.openai_compatible_api_key.as_ref()
-                }
-                _ => None,
-            };
-
-            if let Some(api_key) = key {
-                log::debug!("Using {} API key from ~/.reflex/config.toml", provider);
-                return Ok(api_key.clone());
+    if let Ok(Some(user_config)) = load_user_config()
+        && let Some(credentials) = &user_config.credentials
+    {
+        // Get the appropriate key based on provider
+        let key = match provider_lc.as_str() {
+            "openai" => credentials.openai_api_key.as_ref(),
+            "anthropic" => credentials.anthropic_api_key.as_ref(),
+            "openrouter" => credentials.openrouter_api_key.as_ref(),
+            "openai-compatible" | "openai_compatible" => {
+                credentials.openai_compatible_api_key.as_ref()
             }
+            _ => None,
+        };
+
+        if let Some(api_key) = key {
+            log::debug!("Using {} API key from ~/.reflex/config.toml", provider);
+            return Ok(api_key.clone());
         }
     }
 
     // Check generic REFLEX_AI_API_KEY env var (provider-agnostic, useful for CI)
-    if let Ok(key) = env::var("REFLEX_AI_API_KEY") {
-        if !key.is_empty() {
-            log::debug!(
-                "Using API key from REFLEX_AI_API_KEY env var for provider '{}'",
-                provider
-            );
-            return Ok(key);
-        }
+    if let Ok(key) = env::var("REFLEX_AI_API_KEY")
+        && !key.is_empty()
+    {
+        log::debug!(
+            "Using API key from REFLEX_AI_API_KEY env var for provider '{}'",
+            provider
+        );
+        return Ok(key);
     }
 
     // Fall back to provider-specific environment variables
@@ -364,29 +364,29 @@ pub fn get_api_key(provider: &str) -> Result<String> {
 /// Returns true if at least one API key is found for any provider.
 pub fn is_any_api_key_configured() -> bool {
     // Check user config file first
-    if let Ok(Some(user_config)) = load_user_config() {
-        if let Some(credentials) = &user_config.credentials {
-            // Check if any provider has an API key in the config file
-            if credentials.openai_api_key.is_some()
+    if let Ok(Some(user_config)) = load_user_config()
+        && let Some(credentials) = &user_config.credentials
+    {
+        // Check if any provider has an API key in the config file
+        if credentials.openai_api_key.is_some()
                 || credentials.anthropic_api_key.is_some()
                 || credentials.openrouter_api_key.is_some()
                 || credentials.openai_compatible_api_key.is_some()
                 // openai-compatible can run keyless — a configured base_url
                 // counts as "configured" even without an API key.
                 || credentials.openai_compatible_base_url.is_some()
-            {
-                log::debug!("Found provider credential in ~/.reflex/config.toml");
-                return true;
-            }
+        {
+            log::debug!("Found provider credential in ~/.reflex/config.toml");
+            return true;
         }
     }
 
     // Check generic REFLEX_AI_API_KEY
-    if let Ok(key) = env::var("REFLEX_AI_API_KEY") {
-        if !key.is_empty() {
-            log::debug!("Found REFLEX_AI_API_KEY env var");
-            return true;
-        }
+    if let Ok(key) = env::var("REFLEX_AI_API_KEY")
+        && !key.is_empty()
+    {
+        log::debug!("Found REFLEX_AI_API_KEY env var");
+        return true;
     }
 
     // Check provider-specific environment variables
@@ -414,41 +414,40 @@ pub fn is_any_api_key_configured() -> bool {
 /// Returns None if no model is configured for this provider.
 /// The caller should use provider defaults if None is returned.
 pub fn get_user_model(provider: &str) -> Option<String> {
-    if let Ok(Some(user_config)) = load_user_config() {
-        if let Some(credentials) = &user_config.credentials {
-            let model = match provider.to_lowercase().as_str() {
-                "openai" => credentials.openai_model.as_ref(),
-                "anthropic" => credentials.anthropic_model.as_ref(),
-                "openrouter" => credentials.openrouter_model.as_ref(),
-                "openai-compatible" | "openai_compatible" => {
-                    credentials.openai_compatible_model.as_ref()
-                }
-                _ => None,
-            };
-
-            if let Some(model_name) = model {
-                log::debug!(
-                    "Using {} model from ~/.reflex/config.toml: {}",
-                    provider,
-                    model_name
-                );
-                return Some(model_name.clone());
+    if let Ok(Some(user_config)) = load_user_config()
+        && let Some(credentials) = &user_config.credentials
+    {
+        let model = match provider.to_lowercase().as_str() {
+            "openai" => credentials.openai_model.as_ref(),
+            "anthropic" => credentials.anthropic_model.as_ref(),
+            "openrouter" => credentials.openrouter_model.as_ref(),
+            "openai-compatible" | "openai_compatible" => {
+                credentials.openai_compatible_model.as_ref()
             }
+            _ => None,
+        };
+
+        if let Some(model_name) = model {
+            log::debug!(
+                "Using {} model from ~/.reflex/config.toml: {}",
+                provider,
+                model_name
+            );
+            return Some(model_name.clone());
         }
     }
 
     // Fall back to OPENAI_COMPATIBLE_MODEL env var for the openai-compatible provider
     let provider_lc = provider.to_lowercase();
-    if provider_lc == "openai-compatible" || provider_lc == "openai_compatible" {
-        if let Ok(model) = env::var("OPENAI_COMPATIBLE_MODEL") {
-            if !model.is_empty() {
-                log::debug!(
-                    "Using openai-compatible model from OPENAI_COMPATIBLE_MODEL env var: {}",
-                    model
-                );
-                return Some(model);
-            }
-        }
+    if (provider_lc == "openai-compatible" || provider_lc == "openai_compatible")
+        && let Ok(model) = env::var("OPENAI_COMPATIBLE_MODEL")
+        && !model.is_empty()
+    {
+        log::debug!(
+            "Using openai-compatible model from OPENAI_COMPATIBLE_MODEL env var: {}",
+            model
+        );
+        return Some(model);
     }
 
     None
@@ -540,14 +539,13 @@ pub fn get_provider_options(provider: &str) -> Option<HashMap<String, String>> {
 
     match provider_lc.as_str() {
         "openrouter" => {
-            if let Ok(Some(user_config)) = load_user_config() {
-                if let Some(credentials) = &user_config.credentials {
-                    if let Some(sort) = &credentials.openrouter_sort {
-                        let mut opts = HashMap::new();
-                        opts.insert("sort".to_string(), sort.clone());
-                        return Some(opts);
-                    }
-                }
+            if let Ok(Some(user_config)) = load_user_config()
+                && let Some(credentials) = &user_config.credentials
+                && let Some(sort) = &credentials.openrouter_sort
+            {
+                let mut opts = HashMap::new();
+                opts.insert("sort".to_string(), sort.clone());
+                return Some(opts);
             }
             None
         }
@@ -596,10 +594,10 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = SemanticConfig::default();
-        assert_eq!(config.enabled, true);
+        assert!(config.enabled);
         assert_eq!(config.provider, "openai");
         assert_eq!(config.model, None);
-        assert_eq!(config.auto_execute, false);
+        assert!(!config.auto_execute);
     }
 
     #[test]
@@ -618,7 +616,7 @@ mod tests {
 
         // Should return defaults
         assert_eq!(config.provider, "openai");
-        assert_eq!(config.enabled, true);
+        assert!(config.enabled);
     }
 
     #[test]
@@ -650,10 +648,10 @@ auto_execute = true
             env::remove_var("HOME");
         }
 
-        assert_eq!(config.enabled, true);
+        assert!(config.enabled);
         assert_eq!(config.provider, "anthropic");
         assert_eq!(config.model, Some("claude-3-5-sonnet-20241022".to_string()));
-        assert_eq!(config.auto_execute, true);
+        assert!(config.auto_execute);
     }
 
     #[test]

@@ -125,7 +125,7 @@ fn extract_methods(
         let mut method_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             match capture_name {
                 "class_name" => {
                     class_name = Some(
@@ -205,7 +205,7 @@ fn extract_constants(
         let mut const_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             if capture_name == "name" {
                 let name_text = capture.node.utf8_text(source.as_bytes()).unwrap_or("");
                 // Only include if it's all uppercase (Python constant convention)
@@ -272,7 +272,7 @@ fn extract_global_variables(
         let mut var_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             if capture_name == "name" {
                 let name_text = capture.node.utf8_text(source.as_bytes()).unwrap_or("");
                 // Only include if it's NOT all uppercase (constants are handled separately)
@@ -336,7 +336,7 @@ fn extract_local_variables(
         let mut assignment_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             match capture_name {
                 "name" => {
                     let name_text = capture.node.utf8_text(source.as_bytes()).unwrap_or("");
@@ -428,7 +428,7 @@ fn extract_symbols(
         let mut full_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             if capture_name == "name" {
                 name = Some(
                     capture
@@ -480,7 +480,7 @@ fn extract_preview(source: &str, span: &Span) -> String {
     let lines: Vec<&str> = source.lines().collect();
 
     // Extract 7 lines: the start line and 6 following lines
-    let start_idx = (span.start_line - 1) as usize; // Convert back to 0-indexed
+    let start_idx = span.start_line - 1; // Convert back to 0-indexed
     let end_idx = (start_idx + 7).min(lines.len());
 
     lines[start_idx..end_idx].join("\n")
@@ -545,7 +545,7 @@ fn extract_import_statements(source: &str, root: &tree_sitter::Node) -> Result<V
         let mut import_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             match capture_name {
                 "import_path" => {
                     import_path = Some(
@@ -604,7 +604,7 @@ fn extract_from_imports(source: &str, root: &tree_sitter::Node) -> Result<Vec<Im
         let mut import_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             match capture_name {
                 "module_path" => {
                     module_path = Some(
@@ -653,11 +653,11 @@ fn extract_imported_symbols(source: &str, import_node: &tree_sitter::Node) -> Op
                 // Get the first identifier
                 let mut child_cursor = child.walk();
                 for grandchild in child.children(&mut child_cursor) {
-                    if grandchild.kind() == "identifier" || grandchild.kind() == "dotted_name" {
-                        if let Ok(text) = grandchild.utf8_text(source.as_bytes()) {
-                            symbols.push(text.to_string());
-                            break; // Only get the first one for aliased imports
-                        }
+                    if (grandchild.kind() == "identifier" || grandchild.kind() == "dotted_name")
+                        && let Ok(text) = grandchild.utf8_text(source.as_bytes())
+                    {
+                        symbols.push(text.to_string());
+                        break; // Only get the first one for aliased imports
                     }
                 }
             }
@@ -718,19 +718,21 @@ fn find_pyproject_package(root: &std::path::Path) -> Option<String> {
         }
 
         // Parse name field if we're in [project] section
-        if in_project_section && trimmed.starts_with("name") && trimmed.contains('=') {
-            if let Some(equals_pos) = trimmed.find('=') {
-                let after_equals = trimmed[equals_pos + 1..].trim();
+        if in_project_section
+            && trimmed.starts_with("name")
+            && trimmed.contains('=')
+            && let Some(equals_pos) = trimmed.find('=')
+        {
+            let after_equals = trimmed[equals_pos + 1..].trim();
 
-                // Handle both "name" and 'name'
-                for quote in ['"', '\''] {
-                    if let Some(start) = after_equals.find(quote) {
-                        if let Some(end) = after_equals[start + 1..].find(quote) {
-                            let name = &after_equals[start + 1..start + 1 + end];
-                            // Convert to lowercase for matching (Django → django)
-                            return Some(name.to_lowercase());
-                        }
-                    }
+            // Handle both "name" and 'name'
+            for quote in ['"', '\''] {
+                if let Some(start) = after_equals.find(quote)
+                    && let Some(end) = after_equals[start + 1..].find(quote)
+                {
+                    let name = &after_equals[start + 1..start + 1 + end];
+                    // Convert to lowercase for matching (Django → django)
+                    return Some(name.to_lowercase());
                 }
             }
         }
@@ -759,11 +761,11 @@ fn find_setup_py_package(root: &std::path::Path) -> Option<String> {
 
                     // Handle both "name" and 'name'
                     for quote in ['"', '\''] {
-                        if let Some(start) = after_equals.find(quote) {
-                            if let Some(end) = after_equals[start + 1..].find(quote) {
-                                let name = &after_equals[start + 1..start + 1 + end];
-                                return Some(name.to_lowercase());
-                            }
+                        if let Some(start) = after_equals.find(quote)
+                            && let Some(end) = after_equals[start + 1..].find(quote)
+                        {
+                            let name = &after_equals[start + 1..start + 1 + end];
+                            return Some(name.to_lowercase());
                         }
                     }
                 }
@@ -798,11 +800,13 @@ fn find_setup_cfg_package(root: &std::path::Path) -> Option<String> {
         }
 
         // Parse name field if we're in [metadata] section
-        if in_metadata_section && trimmed.starts_with("name") && trimmed.contains('=') {
-            if let Some(equals_pos) = trimmed.find('=') {
-                let name = trimmed[equals_pos + 1..].trim();
-                return Some(name.to_lowercase());
-            }
+        if in_metadata_section
+            && trimmed.starts_with("name")
+            && trimmed.contains('=')
+            && let Some(equals_pos) = trimmed.find('=')
+        {
+            let name = trimmed[equals_pos + 1..].trim();
+            return Some(name.to_lowercase());
         }
     }
 
@@ -1127,7 +1131,7 @@ pub fn resolve_python_import_to_path(
                 format!("{}/{}/__init__.py", package.project_root, module_path),
             ];
 
-            for candidate in candidates {
+            if let Some(candidate) = candidates.into_iter().next() {
                 log::trace!("Checking Python module path: {}", candidate);
                 return Some(candidate);
             }
@@ -1177,7 +1181,7 @@ fn resolve_relative_python_import(
         format!("{}/{}/__init__.py", target_dir.to_string_lossy(), file_path),
     ];
 
-    for candidate in candidates {
+    if let Some(candidate) = candidates.into_iter().next() {
         log::trace!("Checking relative Python import: {}", candidate);
         return Some(candidate);
     }
@@ -1278,7 +1282,7 @@ class Calculator:
         );
 
         // Check scope
-        for method in method_symbols {
+        for _method in method_symbols {
             // Removed: scope field no longer exists: assert_eq!(method.scope.as_ref().unwrap(), "class Calculator");
         }
     }
@@ -1530,7 +1534,7 @@ class Calculator:
         );
 
         // Verify that local variables have no scope
-        for var in variables {
+        for _var in variables {
             // Removed: scope field no longer exists: assert_eq!(var.scope, None);
         }
     }
@@ -1594,10 +1598,10 @@ def get_config():
         );
 
         // Verify no scope for both
-        for constant in constants {
+        for _constant in constants {
             // Removed: scope field no longer exists: assert_eq!(constant.scope, None);
         }
-        for var in variables {
+        for _var in variables {
             // Removed: scope field no longer exists: assert_eq!(var.scope, None);
         }
     }

@@ -1,3 +1,5 @@
+#![allow(dead_code)] // TUI refactor in progress
+
 use std::env;
 
 /// Terminal capabilities and feature detection

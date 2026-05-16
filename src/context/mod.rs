@@ -130,58 +130,55 @@ fn generate_text_context(
     sections.push(format!("# Project Context: {}\n", path_display));
 
     // Project type detection
-    if opts.project_type {
-        if let Ok(project_info) = detection::detect_project_type(cache, target_path) {
-            sections.push(format!("## Project Type\n{}\n", project_info));
-        }
+    if opts.project_type
+        && let Ok(project_info) = detection::detect_project_type(cache, target_path)
+    {
+        sections.push(format!("## Project Type\n{}\n", project_info));
     }
 
     // Entry points
-    if opts.entry_points {
-        if let Ok(entry_points) = detection::find_entry_points(target_path) {
-            if !entry_points.is_empty() {
-                sections.push(format!("## Entry Points\n{}\n", entry_points.join("\n")));
-            }
-        }
+    if opts.entry_points
+        && let Ok(entry_points) = detection::find_entry_points(target_path)
+        && !entry_points.is_empty()
+    {
+        sections.push(format!("## Entry Points\n{}\n", entry_points.join("\n")));
     }
 
     // Directory structure
-    if opts.structure {
-        if let Ok(tree) = structure::generate_tree(target_path, opts.depth) {
-            sections.push(format!("## Directory Structure\n{}\n", tree));
-        }
+    if opts.structure
+        && let Ok(tree) = structure::generate_tree(target_path, opts.depth)
+    {
+        sections.push(format!("## Directory Structure\n{}\n", tree));
     }
 
     // File type distribution
-    if opts.file_types {
-        if let Ok(distribution) = detection::get_file_distribution(cache) {
-            sections.push(format!("## File Distribution\n{}\n", distribution));
-        }
+    if opts.file_types
+        && let Ok(distribution) = detection::get_file_distribution(cache)
+    {
+        sections.push(format!("## File Distribution\n{}\n", distribution));
     }
 
     // Test layout
-    if opts.test_layout {
-        if let Ok(test_info) = detection::detect_test_layout(target_path) {
-            sections.push(format!("## Test Organization\n{}\n", test_info));
-        }
+    if opts.test_layout
+        && let Ok(test_info) = detection::detect_test_layout(target_path)
+    {
+        sections.push(format!("## Test Organization\n{}\n", test_info));
     }
 
     // Framework detection
-    if opts.framework {
-        if let Ok(frameworks) = detection::detect_frameworks(target_path) {
-            if !frameworks.is_empty() {
-                sections.push(format!("## Framework Detection\n{}\n", frameworks));
-            }
-        }
+    if opts.framework
+        && let Ok(frameworks) = detection::detect_frameworks(target_path)
+        && !frameworks.is_empty()
+    {
+        sections.push(format!("## Framework Detection\n{}\n", frameworks));
     }
 
     // Configuration files
-    if opts.config_files {
-        if let Ok(configs) = detection::find_config_files(target_path) {
-            if !configs.is_empty() {
-                sections.push(format!("## Configuration Files\n{}\n", configs));
-            }
-        }
+    if opts.config_files
+        && let Ok(configs) = detection::find_config_files(target_path)
+        && !configs.is_empty()
+    {
+        sections.push(format!("## Configuration Files\n{}\n", configs));
     }
 
     Ok(sections.join("\n"))
@@ -197,46 +194,46 @@ fn generate_json_context(
 
     let mut context = json!({});
 
-    if opts.project_type {
-        if let Ok(project_type) = detection::detect_project_type_json(cache, target_path) {
-            context["project_type"] = project_type;
-        }
+    if opts.project_type
+        && let Ok(project_type) = detection::detect_project_type_json(cache, target_path)
+    {
+        context["project_type"] = project_type;
     }
 
-    if opts.entry_points {
-        if let Ok(entry_points) = detection::find_entry_points_json(target_path) {
-            context["entry_points"] = entry_points;
-        }
+    if opts.entry_points
+        && let Ok(entry_points) = detection::find_entry_points_json(target_path)
+    {
+        context["entry_points"] = entry_points;
     }
 
-    if opts.structure {
-        if let Ok(tree) = structure::generate_tree_json(target_path, opts.depth) {
-            context["structure"] = tree;
-        }
+    if opts.structure
+        && let Ok(tree) = structure::generate_tree_json(target_path, opts.depth)
+    {
+        context["structure"] = tree;
     }
 
-    if opts.file_types {
-        if let Ok(distribution) = detection::get_file_distribution_json(cache) {
-            context["file_distribution"] = distribution;
-        }
+    if opts.file_types
+        && let Ok(distribution) = detection::get_file_distribution_json(cache)
+    {
+        context["file_distribution"] = distribution;
     }
 
-    if opts.test_layout {
-        if let Ok(test_layout) = detection::detect_test_layout_json(target_path) {
-            context["test_layout"] = test_layout;
-        }
+    if opts.test_layout
+        && let Ok(test_layout) = detection::detect_test_layout_json(target_path)
+    {
+        context["test_layout"] = test_layout;
     }
 
-    if opts.framework {
-        if let Ok(frameworks) = detection::detect_frameworks_json(target_path) {
-            context["frameworks"] = frameworks;
-        }
+    if opts.framework
+        && let Ok(frameworks) = detection::detect_frameworks_json(target_path)
+    {
+        context["frameworks"] = frameworks;
     }
 
-    if opts.config_files {
-        if let Ok(configs) = detection::find_config_files_json(target_path) {
-            context["config_files"] = configs;
-        }
+    if opts.config_files
+        && let Ok(configs) = detection::find_config_files_json(target_path)
+    {
+        context["config_files"] = configs;
     }
 
     serde_json::to_string_pretty(&context).map_err(Into::into)

@@ -191,7 +191,7 @@ impl LlmProvider for OpenRouterProvider {
                     log::warn!("OpenRouter rate limit exceeded: {}", error_text);
                     "Rate limit exceeded (try again in a few seconds)".to_string()
                 }
-                503 | 502 | 504 => {
+                502..=504 => {
                     log::warn!(
                         "OpenRouter service unavailable ({}): {}",
                         status,

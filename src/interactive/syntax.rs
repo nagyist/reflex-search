@@ -2,6 +2,7 @@
 //!
 //! This module provides syntax highlighting for code previews in the TUI,
 //! converting syntect highlighting to ratatui Spans.
+#![allow(dead_code)] // TUI refactor in progress
 
 use ratatui::{
     style::{Color, Style},
@@ -290,7 +291,7 @@ mod tests {
 
     #[test]
     fn test_all_supported_languages_have_syntax() {
-        let highlighter = get_syntax_highlighter();
+        let _highlighter = get_syntax_highlighter();
         let theme = get_default_theme(true);
 
         // Test ALL supported languages (except Swift which is temporarily disabled)

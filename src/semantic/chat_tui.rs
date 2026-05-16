@@ -52,6 +52,7 @@ enum PhaseUpdate {
         execution_time_ms: u64,
     },
     /// Reindexing cache (schema mismatch detected)
+    #[allow(dead_code)]
     Reindexing {
         current: usize,
         total: usize,
@@ -174,12 +175,12 @@ fn render_markdown_with_prefix(
         }
 
         // Check for headers
-        let (header_level, text_after_header) = if content_line.starts_with("### ") {
-            (3, &content_line[4..])
-        } else if content_line.starts_with("## ") {
-            (2, &content_line[3..])
-        } else if content_line.starts_with("# ") {
-            (1, &content_line[2..])
+        let (header_level, text_after_header) = if let Some(s) = content_line.strip_prefix("### ") {
+            (3, s)
+        } else if let Some(s) = content_line.strip_prefix("## ") {
+            (2, s)
+        } else if let Some(s) = content_line.strip_prefix("# ") {
+            (1, s)
         } else {
             (0, content_line)
         };
@@ -227,18 +228,20 @@ fn parse_inline_markdown(text: &str) -> Vec<Span<'static>> {
 
     while i < chars.len() {
         // Check for **bold**
-        if i + 1 < chars.len() && chars[i] == '*' && chars[i + 1] == '*' {
-            if let Some(end) = find_closing_double_star(&chars, i + 2) {
-                let content: String = chars[i + 2..end].iter().collect();
-                result.push(Span::styled(
-                    content,
-                    Style::default()
-                        .fg(Color::White)
-                        .add_modifier(Modifier::BOLD),
-                ));
-                i = end + 2;
-                continue;
-            }
+        if i + 1 < chars.len()
+            && chars[i] == '*'
+            && chars[i + 1] == '*'
+            && let Some(end) = find_closing_double_star(&chars, i + 2)
+        {
+            let content: String = chars[i + 2..end].iter().collect();
+            result.push(Span::styled(
+                content,
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ));
+            i = end + 2;
+            continue;
         }
 
         // Check for *italic* or _italic_
@@ -258,16 +261,16 @@ fn parse_inline_markdown(text: &str) -> Vec<Span<'static>> {
         }
 
         // Check for `code`
-        if chars[i] == '`' {
-            if let Some(end) = find_closing_char(&chars, i + 1, '`') {
-                let content: String = chars[i + 1..end].iter().collect();
-                result.push(Span::styled(
-                    content,
-                    Style::default().fg(Color::Cyan).bg(Color::Black),
-                ));
-                i = end + 1;
-                continue;
-            }
+        if chars[i] == '`'
+            && let Some(end) = find_closing_char(&chars, i + 1, '`')
+        {
+            let content: String = chars[i + 1..end].iter().collect();
+            result.push(Span::styled(
+                content,
+                Style::default().fg(Color::Cyan).bg(Color::Black),
+            ));
+            i = end + 1;
+            continue;
         }
 
         // Regular text - collect until next markdown character
@@ -301,12 +304,7 @@ fn parse_inline_markdown(text: &str) -> Vec<Span<'static>> {
 
 /// Find closing ** for bold
 fn find_closing_double_star(chars: &[char], start: usize) -> Option<usize> {
-    for i in start..chars.len().saturating_sub(1) {
-        if chars[i] == '*' && chars[i + 1] == '*' {
-            return Some(i);
-        }
-    }
-    None
+    (start..chars.len().saturating_sub(1)).find(|&i| chars[i] == '*' && chars[i + 1] == '*')
 }
 
 /// Find closing character for italic or code
@@ -605,16 +603,16 @@ impl ChatApp {
                     )));
 
                     // Show needs_context indicator
-                    if let Some(ref meta) = msg.metadata {
-                        if meta.needs_context {
-                            lines.push(Line::from(vec![
-                                Span::styled("│ ", Style::default().fg(Color::Magenta)),
-                                Span::styled(
-                                    "🔍 Needs context gathering",
-                                    Style::default().fg(Color::Yellow),
-                                ),
-                            ]));
-                        }
+                    if let Some(ref meta) = msg.metadata
+                        && meta.needs_context
+                    {
+                        lines.push(Line::from(vec![
+                            Span::styled("│ ", Style::default().fg(Color::Magenta)),
+                            Span::styled(
+                                "🔍 Needs context gathering",
+                                Style::default().fg(Color::Yellow),
+                            ),
+                        ]));
                     }
 
                     // Message content (with proper wrapping and consistent magenta border)
@@ -636,16 +634,16 @@ impl ChatApp {
                     )));
 
                     // Show tool calls
-                    if let Some(ref meta) = msg.metadata {
-                        if !meta.tool_calls.is_empty() {
-                            lines.push(Line::from(vec![
-                                Span::styled("│ ", Style::default().fg(Color::Blue)),
-                                Span::styled(
-                                    format!("🔧 {} tool calls made", meta.tool_calls.len()),
-                                    Style::default().fg(Color::DarkGray),
-                                ),
-                            ]));
-                        }
+                    if let Some(ref meta) = msg.metadata
+                        && !meta.tool_calls.is_empty()
+                    {
+                        lines.push(Line::from(vec![
+                            Span::styled("│ ", Style::default().fg(Color::Blue)),
+                            Span::styled(
+                                format!("🔧 {} tool calls made", meta.tool_calls.len()),
+                                Style::default().fg(Color::DarkGray),
+                            ),
+                        ]));
                     }
 
                     // Message content (with proper wrapping and consistent blue border)
@@ -667,25 +665,25 @@ impl ChatApp {
                     )));
 
                     // Show query count
-                    if let Some(ref meta) = msg.metadata {
-                        if !meta.queries.is_empty() {
+                    if let Some(ref meta) = msg.metadata
+                        && !meta.queries.is_empty()
+                    {
+                        lines.push(Line::from(vec![
+                            Span::styled("│ ", Style::default().fg(Color::Magenta)),
+                            Span::styled(
+                                format!("📝 Generated {} queries", meta.queries.len()),
+                                Style::default().fg(Color::DarkGray),
+                            ),
+                        ]));
+                        // Optionally show the queries
+                        for (i, query) in meta.queries.iter().enumerate() {
                             lines.push(Line::from(vec![
                                 Span::styled("│ ", Style::default().fg(Color::Magenta)),
                                 Span::styled(
-                                    format!("📝 Generated {} queries", meta.queries.len()),
+                                    format!("  {}. {}", i + 1, query),
                                     Style::default().fg(Color::DarkGray),
                                 ),
                             ]));
-                            // Optionally show the queries
-                            for (i, query) in meta.queries.iter().enumerate() {
-                                lines.push(Line::from(vec![
-                                    Span::styled("│ ", Style::default().fg(Color::Magenta)),
-                                    Span::styled(
-                                        format!("  {}. {}", i + 1, query),
-                                        Style::default().fg(Color::DarkGray),
-                                    ),
-                                ]));
-                            }
                         }
                     }
 
@@ -788,8 +786,7 @@ impl ChatApp {
             // Get current status message or default
             let status_text = self
                 .status_message
-                .as_ref()
-                .map(|s| s.clone())
+                .clone()
                 .unwrap_or_else(|| "Working...".to_string());
 
             lines.push(Line::from(""));
@@ -849,7 +846,7 @@ impl ChatApp {
                     .title(" Messages ")
                     .border_style(Style::default().fg(Color::DarkGray)),
             )
-            .scroll((scroll as u16, 0));
+            .scroll((scroll, 0));
 
         f.render_widget(paragraph, area);
     }
@@ -947,24 +944,18 @@ impl ChatApp {
                 self.input.insert(self.cursor, c);
                 self.cursor += 1;
             }
-            KeyCode::Backspace => {
-                if self.cursor > 0 {
-                    self.input.remove(self.cursor - 1);
-                    self.cursor -= 1;
-                }
+            KeyCode::Backspace if self.cursor > 0 => {
+                self.input.remove(self.cursor - 1);
+                self.cursor -= 1;
             }
-            KeyCode::Delete => {
-                if self.cursor < self.input.len() {
-                    self.input.remove(self.cursor);
-                }
+            KeyCode::Delete if self.cursor < self.input.len() => {
+                self.input.remove(self.cursor);
             }
             KeyCode::Left => {
                 self.cursor = self.cursor.saturating_sub(1);
             }
-            KeyCode::Right => {
-                if self.cursor < self.input.len() {
-                    self.cursor += 1;
-                }
+            KeyCode::Right if self.cursor < self.input.len() => {
+                self.cursor += 1;
             }
             KeyCode::Home => {
                 self.cursor = 0;
@@ -1593,15 +1584,15 @@ async fn execute_query_async(
                     {
                         Ok(agentic_response) => {
                             // Send tools phase update if tools were executed
-                            if let Some(ref tools) = agentic_response.tools_executed {
-                                if !tools.is_empty() {
-                                    let content =
-                                        format!("Gathered context using {} tools", tools.len());
-                                    let _ = tx.send(PhaseUpdate::Tools {
-                                        content,
-                                        tool_calls: tools.clone(),
-                                    });
-                                }
+                            if let Some(ref tools) = agentic_response.tools_executed
+                                && !tools.is_empty()
+                            {
+                                let content =
+                                    format!("Gathered context using {} tools", tools.len());
+                                let _ = tx.send(PhaseUpdate::Tools {
+                                    content,
+                                    tool_calls: tools.clone(),
+                                });
                             }
 
                             // Get results count (needed for answer generation)
@@ -1717,14 +1708,14 @@ async fn execute_query_async(
                 };
 
             // Send tools phase update if tools were executed
-            if let Some(ref tools) = agentic_response.tools_executed {
-                if !tools.is_empty() {
-                    let content = format!("Gathered context using {} tools", tools.len());
-                    let _ = tx.send(PhaseUpdate::Tools {
-                        content,
-                        tool_calls: tools.clone(),
-                    });
-                }
+            if let Some(ref tools) = agentic_response.tools_executed
+                && !tools.is_empty()
+            {
+                let content = format!("Gathered context using {} tools", tools.len());
+                let _ = tx.send(PhaseUpdate::Tools {
+                    content,
+                    tool_calls: tools.clone(),
+                });
             }
 
             // Get results count (needed for answer generation)

@@ -1,5 +1,4 @@
 use crate::cache::CacheManager;
-use crate::output;
 use anyhow::Result;
 use std::path::PathBuf;
 
@@ -283,7 +282,7 @@ pub(super) fn handle_deps(
         let dependents = deps_index.get_dependents(file_id)?;
         let paths = deps_index.get_file_paths(&dependents)?;
 
-        match format.as_ref() {
+        match format {
             "json" => {
                 // Expose only paths (file_id is an internal detail)
                 let output: Vec<_> = dependents.iter().filter_map(|id| paths.get(id)).collect();
@@ -327,7 +326,7 @@ pub(super) fn handle_deps(
             // Direct dependencies only
             let deps = deps_index.get_dependencies(file_id)?;
 
-            match format.as_ref() {
+            match format {
                 "json" => {
                     let output: Vec<_> = deps
                         .iter()
@@ -399,7 +398,7 @@ pub(super) fn handle_deps(
             let file_ids: Vec<_> = transitive.keys().copied().collect();
             let paths = deps_index.get_file_paths(&file_ids)?;
 
-            match format.as_ref() {
+            match format {
                 "json" => {
                     let output: Vec<_> = transitive
                         .iter()
@@ -427,7 +426,7 @@ pub(super) fn handle_deps(
                         std::collections::BTreeMap::new();
                     for (id, d) in &transitive {
                         if *d > 0 {
-                            by_depth.entry(*d).or_insert_with(Vec::new).push(*id);
+                            by_depth.entry(*d).or_default().push(*id);
                         }
                     }
 
@@ -469,6 +468,7 @@ pub(super) fn handle_deps(
 }
 
 /// Handle --circular flag (detect cycles)
+#[allow(clippy::too_many_arguments)]
 fn handle_deps_circular(
     deps_index: &crate::dependency::DependencyIndex,
     format: &str,
@@ -594,10 +594,10 @@ fn handle_deps_circular(
                     }
                 }
                 // Show cycle completion
-                if let Some(first_id) = cycle.first() {
-                    if let Some(path) = paths.get(first_id) {
-                        println!("  → {} (cycle completes)", path);
-                    }
+                if let Some(first_id) = cycle.first()
+                    && let Some(path) = paths.get(first_id)
+                {
+                    println!("  → {} (cycle completes)", path);
                 }
             }
             if total_count > count {
@@ -641,6 +641,7 @@ fn handle_deps_circular(
 }
 
 /// Handle --hotspots flag (most-imported files)
+#[allow(clippy::too_many_arguments)]
 fn handle_deps_hotspots(
     deps_index: &crate::dependency::DependencyIndex,
     format: &str,
@@ -660,11 +661,11 @@ fn handle_deps_hotspots(
     match sort_order {
         "asc" => {
             // Ascending: least imports first
-            all_hotspots.sort_by(|a, b| a.1.cmp(&b.1));
+            all_hotspots.sort_by_key(|a| a.1);
         }
         "desc" => {
             // Descending: most imports first (default)
-            all_hotspots.sort_by(|a, b| b.1.cmp(&a.1));
+            all_hotspots.sort_by_key(|a| std::cmp::Reverse(a.1));
         }
         _ => {
             anyhow::bail!("Invalid sort order '{}'. Supported: asc, desc", sort_order);
@@ -927,6 +928,7 @@ fn handle_deps_unused(
 }
 
 /// Handle --islands flag (disconnected components)
+#[allow(clippy::too_many_arguments)]
 fn handle_deps_islands(
     deps_index: &crate::dependency::DependencyIndex,
     format: &str,
@@ -944,7 +946,7 @@ fn handle_deps_islands(
 
     // Get total file count from the cache for percentage calculation
     let cache = deps_index.get_cache();
-    let total_files = cache.stats()?.total_files as usize;
+    let total_files = cache.stats()?.total_files;
 
     // Calculate max_island_size default: min of 500 or 50% of total files
     let max_size = max_island_size.unwrap_or_else(|| {

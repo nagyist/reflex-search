@@ -141,12 +141,12 @@ pub fn build_changelog_context(commits: &[ChangelogCommit], branch: &str) -> Str
             let areas: Vec<&str> = commit
                 .files_changed
                 .iter()
-                .filter_map(|f| {
+                .map(|f| {
                     let parts: Vec<&str> = f.splitn(3, '/').collect();
                     if parts.len() >= 2 {
-                        Some(parts[..2].join("/").leak() as &str)
+                        parts[..2].join("/").leak() as &str
                     } else {
-                        Some(f.as_str())
+                        f.as_str()
                     }
                 })
                 .collect();

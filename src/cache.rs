@@ -548,10 +548,10 @@ provider = "openrouter"  # Options: openai, anthropic, openrouter
             }
         }
 
-        if let Some(perf) = toml_val.get("performance") {
-            if let Some(threads) = perf.get("parallel_threads").and_then(|v| v.as_integer()) {
-                cfg.parallel_threads = threads as usize;
-            }
+        if let Some(perf) = toml_val.get("performance")
+            && let Some(threads) = perf.get("parallel_threads").and_then(|v| v.as_integer())
+        {
+            cfg.parallel_threads = threads as usize;
         }
 
         log::debug!("Loaded IndexConfig from config.toml: {:?}", cfg);
@@ -2175,7 +2175,7 @@ mod tests {
         assert_eq!(info.branch, "main");
         assert_eq!(info.commit_sha, "commit123");
         assert_eq!(info.file_count, 10);
-        assert_eq!(info.is_dirty, false);
+        assert!(!info.is_dirty);
     }
 
     #[test]
@@ -2189,7 +2189,7 @@ mod tests {
             .unwrap();
 
         let info = cache.get_branch_info("feature").unwrap();
-        assert_eq!(info.is_dirty, true);
+        assert!(info.is_dirty);
     }
 
     #[test]

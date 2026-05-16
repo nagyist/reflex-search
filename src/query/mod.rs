@@ -194,11 +194,7 @@ impl QueryEngine {
                                 (&content_reader_opt, file_id_for_context)
                             {
                                 let result = reader
-                                    .get_context_by_line(
-                                        fid as u32,
-                                        r.span.start_line,
-                                        context_lines,
-                                    )
+                                    .get_context_by_line(fid, r.span.start_line, context_lines)
                                     .unwrap_or_else(|e| {
                                         log::warn!(
                                             "Failed to extract context for {}:{}: {}",
@@ -395,15 +391,16 @@ impl QueryEngine {
         // Example: "class" → SymbolKind::Class, "function" → SymbolKind::Function
         // This ensures keyword queries return only the relevant symbol type
         let mut filter = filter.clone(); // Clone so we can modify it
-        if is_keyword_query && filter.kind.is_none() {
-            if let Some(inferred_kind) = Self::keyword_to_kind(pattern) {
-                log::info!(
-                    "Keyword '{}' mapped to kind {:?} (auto-inferred)",
-                    pattern,
-                    inferred_kind
-                );
-                filter.kind = Some(inferred_kind);
-            }
+        if is_keyword_query
+            && filter.kind.is_none()
+            && let Some(inferred_kind) = Self::keyword_to_kind(pattern)
+        {
+            log::info!(
+                "Keyword '{}' mapped to kind {:?} (auto-inferred)",
+                pattern,
+                inferred_kind
+            );
+            filter.kind = Some(inferred_kind);
         }
 
         // EARLY BROAD QUERY DETECTION (Index Size Check)
@@ -493,17 +490,15 @@ impl QueryEngine {
         // Critical for non-keyword queries to work correctly with accurate candidate counts
         //
         // Skip for keyword queries - those candidates are already pre-filtered by language
-        if !is_keyword_query {
-            if let Some(lang) = filter.language {
-                let before_count = results.len();
-                results.retain(|r| r.lang == lang);
-                log::debug!(
-                    "Language filter ({:?}): reduced {} candidates to {} candidates",
-                    lang,
-                    before_count,
-                    results.len()
-                );
-            }
+        if !is_keyword_query && let Some(lang) = filter.language {
+            let before_count = results.len();
+            results.retain(|r| r.lang == lang);
+            log::debug!(
+                "Language filter ({:?}): reduced {} candidates to {} candidates",
+                lang,
+                before_count,
+                results.len()
+            );
         }
 
         // EARLY GLOB PATTERN FILTER: Apply glob/exclude filtering BEFORE broad query check
@@ -591,10 +586,11 @@ impl QueryEngine {
         }
 
         // Check timeout after Phase 1
-        if let Some(timeout_duration) = timeout {
-            if start_time.elapsed() > timeout_duration {
-                anyhow::bail!(
-                    "Query timeout exceeded ({} seconds).\n\
+        if let Some(timeout_duration) = timeout
+            && start_time.elapsed() > timeout_duration
+        {
+            anyhow::bail!(
+                "Query timeout exceeded ({} seconds).\n\
                      \n\
                      The query took too long to complete. Try one of these approaches:\n\
                      • Use a more specific search pattern (longer patterns = faster search)\n\
@@ -603,10 +599,9 @@ impl QueryEngine {
                      • Increase the timeout with --timeout <seconds>\n\
                      \n\
                      Example: rfx query \"{}\" --lang rust --timeout 60",
-                    filter.timeout_secs,
-                    pattern
-                );
-            }
+                filter.timeout_secs,
+                pattern
+            );
         }
 
         // BROAD QUERY DETECTION: Check if query is too expensive BEFORE parsing
@@ -818,8 +813,8 @@ impl QueryEngine {
                             // Fetch the full span content
                             if let Ok(content) = content_reader.get_file_content(file_id) {
                                 let lines: Vec<&str> = content.lines().collect();
-                                let start_idx = (result.span.start_line as usize).saturating_sub(1);
-                                let end_idx = (result.span.end_line as usize).min(lines.len());
+                                let start_idx = result.span.start_line.saturating_sub(1);
+                                let end_idx = result.span.end_line.min(lines.len());
 
                                 if start_idx < end_idx {
                                     let full_body = lines[start_idx..end_idx].join("\n");
@@ -999,10 +994,10 @@ impl QueryEngine {
             // Apply glob/exclude filters BEFORE loading content (performance optimization)
             let included = include_matcher
                 .as_ref()
-                .map_or(true, |m| m.is_match(&file_path_str));
+                .is_none_or(|m| m.is_match(&file_path_str));
             let excluded = exclude_matcher
                 .as_ref()
-                .map_or(false, |m| m.is_match(&file_path_str));
+                .is_some_and(|m| m.is_match(&file_path_str));
 
             if !included || excluded {
                 continue;
@@ -1092,18 +1087,17 @@ impl QueryEngine {
             let content_path = self.cache.path().join("content.bin");
             if let Ok(content_reader) = ContentReader::open(&content_path) {
                 for result in &mut results {
-                    if result.span.start_line < result.span.end_line {
-                        if let Some(file_id) = Self::find_file_id(&content_reader, &result.path) {
-                            if let Ok(content) = content_reader.get_file_content(file_id) {
-                                let lines: Vec<&str> = content.lines().collect();
-                                let start_idx = (result.span.start_line as usize).saturating_sub(1);
-                                let end_idx = (result.span.end_line as usize).min(lines.len());
+                    if result.span.start_line < result.span.end_line
+                        && let Some(file_id) = Self::find_file_id(&content_reader, &result.path)
+                        && let Ok(content) = content_reader.get_file_content(file_id)
+                    {
+                        let lines: Vec<&str> = content.lines().collect();
+                        let start_idx = result.span.start_line.saturating_sub(1);
+                        let end_idx = result.span.end_line.min(lines.len());
 
-                                if start_idx < end_idx {
-                                    let full_body = lines[start_idx..end_idx].join("\n");
-                                    result.preview = full_body;
-                                }
-                            }
+                        if start_idx < end_idx {
+                            let full_body = lines[start_idx..end_idx].join("\n");
+                            result.preview = full_body;
                         }
                     }
                 }
@@ -1258,12 +1252,10 @@ impl QueryEngine {
             };
 
             results.retain(|r| {
-                let included = include_matcher
-                    .as_ref()
-                    .map_or(true, |m| m.is_match(&r.path));
+                let included = include_matcher.as_ref().is_none_or(|m| m.is_match(&r.path));
                 let excluded = exclude_matcher
                     .as_ref()
-                    .map_or(false, |m| m.is_match(&r.path));
+                    .is_some_and(|m| m.is_match(&r.path));
                 included && !excluded
             });
         }
@@ -1277,18 +1269,17 @@ impl QueryEngine {
             let content_path = self.cache.path().join("content.bin");
             if let Ok(content_reader) = ContentReader::open(&content_path) {
                 for result in &mut results {
-                    if result.span.start_line < result.span.end_line {
-                        if let Some(file_id) = Self::find_file_id(&content_reader, &result.path) {
-                            if let Ok(content) = content_reader.get_file_content(file_id) {
-                                let lines: Vec<&str> = content.lines().collect();
-                                let start_idx = (result.span.start_line as usize).saturating_sub(1);
-                                let end_idx = (result.span.end_line as usize).min(lines.len());
+                    if result.span.start_line < result.span.end_line
+                        && let Some(file_id) = Self::find_file_id(&content_reader, &result.path)
+                        && let Ok(content) = content_reader.get_file_content(file_id)
+                    {
+                        let lines: Vec<&str> = content.lines().collect();
+                        let start_idx = result.span.start_line.saturating_sub(1);
+                        let end_idx = result.span.end_line.min(lines.len());
 
-                                if start_idx < end_idx {
-                                    let full_body = lines[start_idx..end_idx].join("\n");
-                                    result.preview = full_body;
-                                }
-                            }
+                        if start_idx < end_idx {
+                            let full_body = lines[start_idx..end_idx].join("\n");
+                            result.preview = full_body;
                         }
                     }
                 }
@@ -1403,7 +1394,7 @@ impl QueryEngine {
 
             files_by_path
                 .entry(candidate.path.clone())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(candidate);
         }
 
@@ -1508,9 +1499,7 @@ impl QueryEngine {
                 .unwrap_or(4);
             // Use 80% of available cores (minimum 1, maximum 8) to avoid locking the system
             // Cap at 8 to prevent diminishing returns from cache contention on high-core systems
-            ((available_cores as f64 * 0.8).ceil() as usize)
-                .max(1)
-                .min(8)
+            ((available_cores as f64 * 0.8).ceil() as usize).clamp(1, 8)
         };
 
         log::debug!(
@@ -1643,10 +1632,10 @@ impl QueryEngine {
                     };
 
                     // Cache the parsed symbols (ignore errors - caching is best-effort)
-                    if let Some(file_hash) = file_hashes.get(file_path.as_str()) {
-                        if let Err(e) = symbol_cache.set(file_path, file_hash, &symbols) {
-                            log::debug!("Failed to cache symbols for {}: {}", file_path, e);
-                        }
+                    if let Some(file_hash) = file_hashes.get(file_path.as_str())
+                        && let Err(e) = symbol_cache.set(file_path, file_hash, &symbols)
+                    {
+                        log::debug!("Failed to cache symbols for {}: {}", file_path, e);
                     }
 
                     symbols
@@ -1715,7 +1704,7 @@ impl QueryEngine {
                 for cand in candidate.1 {
                     candidate_lines
                         .entry(candidate.0.clone())
-                        .or_insert_with(HashSet::new)
+                        .or_default()
                         .insert(cand.span.start_line);
                 }
             }
@@ -1739,13 +1728,13 @@ impl QueryEngine {
             // Substring match (opt-in with --contains)
             all_symbols
                 .into_iter()
-                .filter(|sym| sym.symbol.as_deref().map_or(false, |s| s.contains(pattern)))
+                .filter(|sym| sym.symbol.as_deref().is_some_and(|s| s.contains(pattern)))
                 .collect()
         } else {
             // Exact match (default)
             all_symbols
                 .into_iter()
-                .filter(|sym| sym.symbol.as_deref().map_or(false, |s| s == pattern))
+                .filter(|sym| sym.symbol.as_deref() == Some(pattern))
                 .collect()
         };
 
@@ -1861,19 +1850,19 @@ impl QueryEngine {
     ) -> Option<u32> {
         // Try trigram index first (faster)
         for file_id in 0..trigram_index.file_count() {
-            if let Some(path) = trigram_index.get_file(file_id as u32) {
-                if path.to_string_lossy() == target_path {
-                    return Some(file_id as u32);
-                }
+            if let Some(path) = trigram_index.get_file(file_id as u32)
+                && path.to_string_lossy() == target_path
+            {
+                return Some(file_id as u32);
             }
         }
 
         // Fallback to content reader
         for file_id in 0..content_reader.file_count() {
-            if let Some(path) = content_reader.get_file_path(file_id as u32) {
-                if path.to_string_lossy() == target_path {
-                    return Some(file_id as u32);
-                }
+            if let Some(path) = content_reader.get_file_path(file_id as u32)
+                && path.to_string_lossy() == target_path
+            {
+                return Some(file_id as u32);
             }
         }
 
@@ -1950,10 +1939,10 @@ impl QueryEngine {
             let detected_lang = Language::from_extension(ext);
 
             // Filter by language (if specified)
-            if let Some(lang) = filter.language {
-                if detected_lang != lang {
-                    continue;
-                }
+            if let Some(lang) = filter.language
+                && detected_lang != lang
+            {
+                continue;
             }
 
             let file_path_str = file_path.to_string_lossy().to_string();
@@ -1961,20 +1950,20 @@ impl QueryEngine {
             // Apply glob/exclude filters
             let included = include_matcher
                 .as_ref()
-                .map_or(true, |m| m.is_match(&file_path_str));
+                .is_none_or(|m| m.is_match(&file_path_str));
             let excluded = exclude_matcher
                 .as_ref()
-                .map_or(false, |m| m.is_match(&file_path_str));
+                .is_some_and(|m| m.is_match(&file_path_str));
 
             if !included || excluded {
                 continue;
             }
 
             // Apply file path filter if specified
-            if let Some(ref file_pattern) = filter.file_pattern {
-                if !file_path_str.contains(file_pattern) {
-                    continue;
-                }
+            if let Some(ref file_pattern) = filter.file_pattern
+                && !file_path_str.contains(file_pattern)
+            {
+                continue;
             }
 
             // Create a dummy candidate for this file
@@ -2083,10 +2072,7 @@ impl QueryEngine {
         let mut candidates_by_file: HashMap<u32, Vec<crate::trigram::FileLocation>> =
             HashMap::new();
         for loc in candidates {
-            candidates_by_file
-                .entry(loc.file_id)
-                .or_insert_with(Vec::new)
-                .push(loc);
+            candidates_by_file.entry(loc.file_id).or_default().push(loc);
         }
 
         log::debug!(
@@ -2174,7 +2160,7 @@ impl QueryEngine {
                     // Create a text match result (no symbol lookup for performance)
                     file_results.push(SearchResult {
                         path: file_path_str.clone(),
-                        lang: lang.clone(),
+                        lang,
                         kind: SymbolKind::Unknown("text_match".to_string()),
                         symbol: None, // No symbol name for text matches (avoid duplication)
                         span: Span {
@@ -2263,7 +2249,7 @@ impl QueryEngine {
                     seen_lines.insert(line_no);
                     file_results.push(SearchResult {
                         path: file_path_str.clone(),
-                        lang: lang.clone(),
+                        lang,
                         kind: SymbolKind::Unknown("text_match".to_string()),
                         symbol: None,
                         span: Span {
@@ -2323,13 +2309,13 @@ impl QueryEngine {
             Regex::new(pattern).with_context(|| format!("Invalid regex pattern: {}", pattern))?;
 
         // Check timeout before expensive operations
-        if let Some(timeout_duration) = timeout {
-            if start_time.elapsed() > *timeout_duration {
-                anyhow::bail!(
-                    "Query timeout exceeded ({} seconds) during regex compilation",
-                    timeout_duration.as_secs()
-                );
-            }
+        if let Some(timeout_duration) = timeout
+            && start_time.elapsed() > *timeout_duration
+        {
+            anyhow::bail!(
+                "Query timeout exceeded ({} seconds) during regex compilation",
+                timeout_duration.as_secs()
+            );
         }
 
         // Step 2: Extract trigrams from regex
@@ -2464,7 +2450,7 @@ impl QueryEngine {
                 // The user can see the full context in the 'preview' field
                 results.push(SearchResult {
                     path: file_path_str.clone(),
-                    lang: lang.clone(),
+                    lang,
                     kind: SymbolKind::Unknown("regex_match".to_string()),
                     symbol: None, // No symbol name for regex matches
                     span: Span {
@@ -2504,98 +2490,94 @@ impl QueryEngine {
         let root = self.cache.workspace_root();
 
         // Check git state if in a git repo
-        if crate::git::is_git_repo(&root) {
-            if let Ok(current_branch) = crate::git::get_current_branch(&root) {
-                // Check if we're on a different branch than what was indexed
-                if !self.cache.branch_exists(&current_branch).unwrap_or(false) {
+        if crate::git::is_git_repo(&root)
+            && let Ok(current_branch) = crate::git::get_current_branch(&root)
+        {
+            // Check if we're on a different branch than what was indexed
+            if !self.cache.branch_exists(&current_branch).unwrap_or(false) {
+                let warning = IndexWarning {
+                    reason: format!("Branch '{}' has not been indexed", current_branch),
+                    action_required: "rfx index".to_string(),
+                    files_modified: None,
+                    details: Some(IndexWarningDetails {
+                        current_branch: Some(current_branch),
+                        indexed_branch: None,
+                        current_commit: None,
+                        indexed_commit: None,
+                    }),
+                };
+                return Ok((IndexStatus::Stale, false, Some(warning)));
+            }
+
+            // Branch exists - check if commit changed
+            if let (Ok(current_commit), Ok(branch_info)) = (
+                crate::git::get_current_commit(&root),
+                self.cache.get_branch_info(&current_branch),
+            ) {
+                if branch_info.commit_sha != current_commit {
                     let warning = IndexWarning {
-                        reason: format!("Branch '{}' has not been indexed", current_branch),
+                        reason: format!(
+                            "Commit changed from {} to {}",
+                            &branch_info.commit_sha[..7],
+                            &current_commit[..7]
+                        ),
                         action_required: "rfx index".to_string(),
                         files_modified: None,
                         details: Some(IndexWarningDetails {
-                            current_branch: Some(current_branch),
-                            indexed_branch: None,
-                            current_commit: None,
-                            indexed_commit: None,
+                            current_branch: Some(current_branch.clone()),
+                            indexed_branch: Some(current_branch.clone()),
+                            current_commit: Some(current_commit.clone()),
+                            indexed_commit: Some(branch_info.commit_sha.clone()),
                         }),
                     };
                     return Ok((IndexStatus::Stale, false, Some(warning)));
                 }
 
-                // Branch exists - check if commit changed
-                if let (Ok(current_commit), Ok(branch_info)) = (
-                    crate::git::get_current_commit(&root),
-                    self.cache.get_branch_info(&current_branch),
-                ) {
-                    if branch_info.commit_sha != current_commit {
+                // If commits match, do a quick file freshness check
+                if let Ok(branch_files) = self.cache.get_branch_files(&current_branch) {
+                    let mut checked = 0;
+                    let mut changed = 0;
+                    const SAMPLE_SIZE: usize = 10;
+
+                    for (path, _indexed_hash) in branch_files.iter().take(SAMPLE_SIZE) {
+                        checked += 1;
+                        let file_path = std::path::Path::new(path);
+
+                        if let Ok(metadata) = std::fs::metadata(file_path)
+                            && let Ok(modified) = metadata.modified()
+                        {
+                            let indexed_time = branch_info.last_indexed;
+                            let file_time = modified
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs() as i64;
+
+                            if file_time > indexed_time {
+                                // File modified after indexing - likely stale
+                                // Note: We skip hash verification for performance (mtime check is sufficient)
+                                changed += 1;
+                            }
+                        }
+                    }
+
+                    if changed > 0 {
                         let warning = IndexWarning {
-                            reason: format!(
-                                "Commit changed from {} to {}",
-                                &branch_info.commit_sha[..7],
-                                &current_commit[..7]
-                            ),
+                            reason: format!("{} of {} sampled files modified", changed, checked),
                             action_required: "rfx index".to_string(),
-                            files_modified: None,
+                            files_modified: Some(changed as u32),
                             details: Some(IndexWarningDetails {
                                 current_branch: Some(current_branch.clone()),
-                                indexed_branch: Some(current_branch.clone()),
+                                indexed_branch: Some(branch_info.branch.clone()),
                                 current_commit: Some(current_commit.clone()),
                                 indexed_commit: Some(branch_info.commit_sha.clone()),
                             }),
                         };
                         return Ok((IndexStatus::Stale, false, Some(warning)));
                     }
-
-                    // If commits match, do a quick file freshness check
-                    if let Ok(branch_files) = self.cache.get_branch_files(&current_branch) {
-                        let mut checked = 0;
-                        let mut changed = 0;
-                        const SAMPLE_SIZE: usize = 10;
-
-                        for (path, _indexed_hash) in branch_files.iter().take(SAMPLE_SIZE) {
-                            checked += 1;
-                            let file_path = std::path::Path::new(path);
-
-                            if let Ok(metadata) = std::fs::metadata(file_path) {
-                                if let Ok(modified) = metadata.modified() {
-                                    let indexed_time = branch_info.last_indexed;
-                                    let file_time = modified
-                                        .duration_since(std::time::UNIX_EPOCH)
-                                        .unwrap_or_default()
-                                        .as_secs()
-                                        as i64;
-
-                                    if file_time > indexed_time {
-                                        // File modified after indexing - likely stale
-                                        // Note: We skip hash verification for performance (mtime check is sufficient)
-                                        changed += 1;
-                                    }
-                                }
-                            }
-                        }
-
-                        if changed > 0 {
-                            let warning = IndexWarning {
-                                reason: format!(
-                                    "{} of {} sampled files modified",
-                                    changed, checked
-                                ),
-                                action_required: "rfx index".to_string(),
-                                files_modified: Some(changed as u32),
-                                details: Some(IndexWarningDetails {
-                                    current_branch: Some(current_branch.clone()),
-                                    indexed_branch: Some(branch_info.branch.clone()),
-                                    current_commit: Some(current_commit.clone()),
-                                    indexed_commit: Some(branch_info.commit_sha.clone()),
-                                }),
-                            };
-                            return Ok((IndexStatus::Stale, false, Some(warning)));
-                        }
-                    }
-
-                    // All checks passed - index is fresh
-                    return Ok((IndexStatus::Fresh, true, None));
                 }
+
+                // All checks passed - index is fresh
+                return Ok((IndexStatus::Fresh, true, None));
             }
         }
 
@@ -2663,23 +2645,23 @@ impl QueryEngine {
                             let file_path = std::path::Path::new(path);
 
                             // Check if file exists and has been modified (mtime/size heuristic)
-                            if let Ok(metadata) = std::fs::metadata(file_path) {
-                                if let Ok(modified) = metadata.modified() {
-                                    let indexed_time = branch_info.last_indexed;
-                                    let file_time = modified
-                                        .duration_since(std::time::UNIX_EPOCH)
-                                        .unwrap_or_default()
-                                        .as_secs()
-                                        as i64;
+                            if let Ok(metadata) = std::fs::metadata(file_path)
+                                && let Ok(modified) = metadata.modified()
+                            {
+                                let indexed_time = branch_info.last_indexed;
+                                let file_time = modified
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap_or_default()
+                                    .as_secs()
+                                    as i64;
 
-                                    // If file modified after indexing, it might be stale
-                                    if file_time > indexed_time {
-                                        // File modified after indexing - likely stale
-                                        // Note: We skip hash verification for performance (mtime check is sufficient)
-                                        // This may cause false positives if files were touched without changes,
-                                        // but the warning is non-blocking and vastly better than slow queries
-                                        changed += 1;
-                                    }
+                                // If file modified after indexing, it might be stale
+                                if file_time > indexed_time {
+                                    // File modified after indexing - likely stale
+                                    // Note: We skip hash verification for performance (mtime check is sufficient)
+                                    // This may cause false positives if files were touched without changes,
+                                    // but the warning is non-blocking and vastly better than slow queries
+                                    changed += 1;
                                 }
                             }
                         }
@@ -2703,6 +2685,7 @@ impl QueryEngine {
 ///
 /// Provides context-aware guidance to AI agents on how to handle search results.
 /// Uses priority-based logic to determine the most relevant instruction.
+#[allow(clippy::too_many_arguments)]
 pub fn generate_ai_instruction(
     result_count: usize,
     total_count: usize,
@@ -2747,7 +2730,7 @@ pub fn generate_ai_instruction(
     }
 
     // Priority 5: Few precise results (symbols mode)
-    if result_count >= 2 && result_count <= 10 && symbols_mode {
+    if (2..=10).contains(&result_count) && symbols_mode {
         return Some(format!(
             "Found {} precise results (definitions only, not usages). List locations concisely: '[symbol] at [path]:[line]' for each result.",
             result_count
@@ -2755,7 +2738,7 @@ pub fn generate_ai_instruction(
     }
 
     // Priority 6: Many results (101-500)
-    if total_count >= 101 && total_count < 500 {
+    if (101..500).contains(&total_count) {
         return Some(format!(
             "Found {} results - this is broad. Suggest refining search with: kind parameter (Function/Struct/Class/etc), lang parameter (rust/python/etc), or glob parameter to narrow file scope.",
             total_count
@@ -2924,7 +2907,7 @@ mod tests {
         let results = engine.search("greet", filter).unwrap();
 
         // Should find only the definition, not the call
-        assert!(results.len() >= 1);
+        assert!(!results.is_empty());
         assert!(results.iter().any(|r| r.kind == SymbolKind::Function));
     }
 
@@ -3019,7 +3002,7 @@ mod tests {
         let results = engine.search("mai", filter).unwrap();
 
         // Should find main function
-        assert!(results.len() > 0, "Should find at least one result");
+        assert!(!results.is_empty(), "Should find at least one result");
         assert!(
             results.iter().any(|r| r.symbol.as_deref() == Some("main")),
             "Should find 'main' function"
@@ -3151,7 +3134,7 @@ mod tests {
         let results = engine.search("greet", filter).unwrap();
 
         // Should have full function body in preview
-        assert!(results.len() >= 1);
+        assert!(!results.is_empty());
         let result = &results[0];
         assert!(result.preview.contains("println"));
     }
@@ -3210,7 +3193,7 @@ mod tests {
 
         // Search for special characters
         let results = engine.search("x + ", filter).unwrap();
-        assert!(results.len() >= 1);
+        assert!(!results.is_empty());
     }
 
     #[test]
@@ -3236,7 +3219,7 @@ mod tests {
 
         // Search for unicode characters
         let results = engine.search("你好", filter).unwrap();
-        assert!(results.len() >= 1);
+        assert!(!results.is_empty());
     }
 
     #[test]
@@ -3364,7 +3347,7 @@ mod tests {
         let engine = QueryEngine::new(cache);
         let results = engine.find_symbol("greet").unwrap();
 
-        assert!(results.len() >= 1);
+        assert!(!results.is_empty());
         assert_eq!(results[0].kind, SymbolKind::Function);
     }
 
@@ -3398,7 +3381,7 @@ mod tests {
         let results = engine.search("oin", filter).unwrap();
 
         // Should find Point struct
-        assert!(results.len() >= 1, "Should find at least Point struct");
+        assert!(!results.is_empty(), "Should find at least Point struct");
         assert!(results.iter().all(|r| r.kind == SymbolKind::Struct));
         assert!(results.iter().any(|r| r.symbol.as_deref() == Some("Point")));
     }
@@ -3424,7 +3407,7 @@ mod tests {
         let response = engine.search_with_metadata("test", filter).unwrap();
 
         // Check metadata is present (status might be stale if run inside git repo)
-        assert!(response.results.len() >= 1);
+        assert!(!response.results.is_empty());
         // Note: can_trust_results may be false if running in a git repo without branch index
     }
 

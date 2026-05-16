@@ -5,7 +5,6 @@
 Reflex is a local-first, full-text code search engine. Use it from the command line, pipe it into scripts, or connect it to AI coding assistants (Claude Code, Cursor, and any MCP-compatible tool) for instant symbol lookup, dependency analysis, and codebase exploration — fully offline, fully deterministic, no cloud required.
 
 [![CI](https://github.com/reflex-search/reflex/actions/workflows/ci.yml/badge.svg)](https://github.com/reflex-search/reflex/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-347%20passing-brightgreen)]()
 [![License](https://img.shields.io/badge/license-MIT-blue)]()
 [![MCP Quickstart](https://img.shields.io/badge/MCP-quickstart-blue)](docs/ai-agent-integration.md)
 
@@ -85,7 +84,9 @@ When connected via MCP, your AI assistant gets these tools:
 | `count_occurrences` | Quick match statistics without full content |
 | `search_regex` | Regex pattern matching across the codebase |
 | `search_ast` | Structure-aware search via Tree-sitter AST queries |
+| `find_references` | Symbol definition + all usage sites in a single call; the primary code-navigation tool for AI agents |
 | `index_project` | Trigger or refresh the search index |
+| `check_index_status` | Check whether the index is fresh, stale, or missing; call before any search session or after git operations |
 | `get_dependencies` | All imports for a specific file |
 | `get_dependents` | All files that import a given file (reverse lookup) |
 | `get_transitive_deps` | Transitive dependency graph up to a configurable depth |
@@ -154,7 +155,7 @@ rfx index                 # Build / update the search index
 rfx index status          # Background indexing status
 rfx watch                 # Auto-reindex on file changes
 rfx stats                 # Index statistics
-rfx pulse digest          # Codebase change digest
+rfx pulse changelog       # Codebase change digest
 rfx pulse wiki            # Per-module documentation
 rfx pulse map             # Architecture diagram (Mermaid / D2)
 rfx serve --port 7878     # Local HTTP API server
@@ -189,6 +190,8 @@ Full symbol extraction (functions, classes, methods, types, etc.) for 15 languag
 **Systems:** Rust, C, C++, Zig  
 **Backend:** Python, Go, Java, C#, PHP, Ruby, Kotlin  
 **Frontend:** TypeScript, JavaScript, Vue, Svelte
+
+> **Swift** is temporarily disabled (tree-sitter-swift 0.7.x grammar incompatibility). `rfx query --lang swift` emits a warning; full-text search still works.
 
 Full-text search works on **all file types** regardless of parser support.
 

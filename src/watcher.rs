@@ -129,53 +129,50 @@ pub fn watch(path: &Path, indexer: Indexer, config: WatchConfig) -> Result<()> {
             Err(RecvTimeoutError::Timeout) => {
                 // Check if debounce period has elapsed
                 let has_pending = !pending_files.is_empty() || !pending_deletions.is_empty();
-                if let Some(last_time) = last_event_time {
-                    if has_pending && last_time.elapsed() >= debounce_duration {
-                        // Trigger reindex
-                        let total_changes = pending_files.len() + pending_deletions.len();
-                        if !config.quiet {
-                            if pending_deletions.is_empty() {
-                                println!(
-                                    "\nDetected {} changed file(s), reindexing...",
-                                    pending_files.len()
-                                );
-                            } else {
-                                println!(
-                                    "\nDetected {} change(s) ({} deleted), reindexing...",
-                                    total_changes,
-                                    pending_deletions.len()
-                                );
-                            }
+                if let Some(last_time) = last_event_time
+                    && has_pending
+                    && last_time.elapsed() >= debounce_duration
+                {
+                    // Trigger reindex
+                    let total_changes = pending_files.len() + pending_deletions.len();
+                    if !config.quiet {
+                        if pending_deletions.is_empty() {
+                            println!(
+                                "\nDetected {} changed file(s), reindexing...",
+                                pending_files.len()
+                            );
+                        } else {
+                            println!(
+                                "\nDetected {} change(s) ({} deleted), reindexing...",
+                                total_changes,
+                                pending_deletions.len()
+                            );
                         }
-
-                        let start = Instant::now();
-                        match indexer.index(path, false) {
-                            Ok(stats) => {
-                                let elapsed = start.elapsed();
-                                if !config.quiet {
-                                    println!(
-                                        "✓ Reindexed {} files in {:.1}ms\n",
-                                        stats.total_files,
-                                        elapsed.as_secs_f64() * 1000.0
-                                    );
-                                }
-                                log::info!(
-                                    "Reindexed {} files in {:?}",
-                                    stats.total_files,
-                                    elapsed
-                                );
-                            }
-                            Err(e) => {
-                                output::error(&format!("✗ Reindex failed: {}", e));
-                                log::error!("Reindex failed: {}", e);
-                            }
-                        }
-
-                        // Clear pending changes
-                        pending_files.clear();
-                        pending_deletions.clear();
-                        last_event_time = None;
                     }
+
+                    let start = Instant::now();
+                    match indexer.index(path, false) {
+                        Ok(stats) => {
+                            let elapsed = start.elapsed();
+                            if !config.quiet {
+                                println!(
+                                    "✓ Reindexed {} files in {:.1}ms\n",
+                                    stats.total_files,
+                                    elapsed.as_secs_f64() * 1000.0
+                                );
+                            }
+                            log::info!("Reindexed {} files in {:?}", stats.total_files, elapsed);
+                        }
+                        Err(e) => {
+                            output::error(&format!("✗ Reindex failed: {}", e));
+                            log::error!("Reindex failed: {}", e);
+                        }
+                    }
+
+                    // Clear pending changes
+                    pending_files.clear();
+                    pending_deletions.clear();
+                    last_event_time = None;
                 }
             }
             Err(RecvTimeoutError::Disconnected) => {
@@ -210,6 +207,7 @@ fn process_event_typed(event: &Event) -> Option<(PathBuf, bool)> {
 /// Process a file system event and extract the changed path
 ///
 /// Returns None if the event should be ignored (e.g., metadata changes, directory events)
+#[allow(dead_code)]
 fn process_event(event: &Event) -> Option<PathBuf> {
     process_event_typed(event).map(|(p, _)| p)
 }
@@ -219,10 +217,10 @@ fn process_event(event: &Event) -> Option<PathBuf> {
 /// Returns true if the file has a supported language extension
 fn should_watch_file(path: &Path) -> bool {
     // Skip hidden files and directories
-    if let Some(file_name) = path.file_name() {
-        if file_name.to_string_lossy().starts_with('.') {
-            return false;
-        }
+    if let Some(file_name) = path.file_name()
+        && file_name.to_string_lossy().starts_with('.')
+    {
+        return false;
     }
 
     // Skip directories

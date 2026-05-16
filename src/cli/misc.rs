@@ -246,18 +246,17 @@ pub(super) fn handle_list_files(
         .into_iter()
         .filter(|f| {
             // Language filter: compare lowercase language name
-            if let Some(ref wanted_lang) = lang_name_filter {
-                if !f.language.to_lowercase().starts_with(wanted_lang.as_str())
-                    && f.language.to_lowercase() != *wanted_lang
-                {
-                    return false;
-                }
+            if let Some(ref wanted_lang) = lang_name_filter
+                && !f.language.to_lowercase().starts_with(wanted_lang.as_str())
+                && f.language.to_lowercase() != *wanted_lang
+            {
+                return false;
             }
             // Glob filter
-            if let Some(ref gs) = glob_set {
-                if !gs.is_match(&f.path) {
-                    return false;
-                }
+            if let Some(ref gs) = glob_set
+                && !gs.is_match(&f.path)
+            {
+                return false;
             }
             true
         })
@@ -292,6 +291,7 @@ pub(super) fn handle_mcp() -> Result<()> {
 }
 
 /// Handle the `context` command
+#[allow(clippy::too_many_arguments)]
 pub(super) fn handle_context(
     structure: bool,
     path: Option<String>,

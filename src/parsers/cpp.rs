@@ -208,7 +208,7 @@ fn extract_methods(
         let mut method_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             match capture_name {
                 "class_name" => {
                     scope_name = Some(
@@ -298,7 +298,7 @@ fn extract_local_variables(
         let mut var_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             match capture_name {
                 "name" => {
                     name = Some(
@@ -389,7 +389,7 @@ fn extract_symbols(
         let mut full_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             if capture_name == "name" {
                 name = Some(
                     capture
@@ -450,7 +450,7 @@ fn extract_preview(source: &str, span: &Span) -> String {
     let lines: Vec<&str> = source.lines().collect();
 
     // Extract 7 lines: the start line and 6 following lines
-    let start_idx = (span.start_line - 1) as usize; // Convert back to 0-indexed
+    let start_idx = span.start_line - 1; // Convert back to 0-indexed
     let end_idx = (start_idx + 7).min(lines.len());
 
     lines[start_idx..end_idx].join("\n")
@@ -517,7 +517,7 @@ namespace Nested::Namespace {
             .filter(|s| matches!(s.kind, SymbolKind::Namespace))
             .collect();
 
-        assert!(namespace_symbols.len() >= 1);
+        assert!(!namespace_symbols.is_empty());
         assert!(
             namespace_symbols
                 .iter()
@@ -650,7 +650,7 @@ public:
         );
 
         // Check scope
-        for method in method_symbols {
+        for _method in method_symbols {
             // Removed: scope field no longer exists: assert_eq!(method.scope.as_ref().unwrap(), "class Calculator");
         }
     }
@@ -669,7 +669,7 @@ using IntPtr = int*;
             .filter(|s| matches!(s.kind, SymbolKind::Type))
             .collect();
 
-        assert!(type_symbols.len() >= 1);
+        assert!(!type_symbols.is_empty());
         assert!(
             type_symbols
                 .iter()
@@ -693,7 +693,7 @@ typedef struct {
             .filter(|s| matches!(s.kind, SymbolKind::Type))
             .collect();
 
-        assert!(type_symbols.len() >= 1);
+        assert!(!type_symbols.is_empty());
     }
 
     #[test]
@@ -886,7 +886,7 @@ public:
         );
 
         // Verify that local variables have no scope
-        for var in variables {
+        for _var in variables {
             // Removed: scope field no longer exists: assert_eq!(var.scope, None);
         }
     }
@@ -927,7 +927,7 @@ public:
 
         // Should have both constructor and destructor
         assert!(
-            method_symbols.len() >= 1,
+            !method_symbols.is_empty(),
             "Expected at least constructor or destructor to be extracted"
         );
 
@@ -1010,7 +1010,7 @@ fn extract_cpp_includes(source: &str, root: &tree_sitter::Node) -> Result<Vec<Im
         let mut include_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             match capture_name {
                 "include_path" => {
                     // Remove quotes or angle brackets from path

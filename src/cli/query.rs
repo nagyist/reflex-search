@@ -2,7 +2,6 @@ use crate::cache::CacheManager;
 use crate::models::Language;
 use crate::query::{QueryEngine, QueryFilter};
 use anyhow::Result;
-use indicatif::{ProgressBar, ProgressStyle};
 use owo_colors::OwoColorize;
 use std::time::Instant;
 
@@ -28,6 +27,7 @@ pub fn truncate_preview(preview: &str, max_length: usize) -> String {
 }
 
 /// Handle the `query` subcommand
+#[allow(clippy::too_many_arguments)]
 pub(super) fn handle_query(
     pattern: String,
     symbols_flag: bool,
@@ -78,6 +78,25 @@ pub(super) fn handle_query(
         None
     };
 
+    // Warn when Swift is requested — symbol queries will return no results
+    if language == Some(Language::Swift) {
+        eprintln!(
+            "{}: Swift symbol extraction is temporarily disabled (tree-sitter-swift 0.7.x grammar incompatibility). \
+Full-text search will still work, but --symbols queries will return no results.",
+            "Warning".yellow().bold()
+        );
+    }
+
+    // Warn when --dependencies is used with a non-Rust language filter (REF-171)
+    if include_dependencies && matches!(language, Some(l) if l != Language::Rust) {
+        eprintln!(
+            "{}: --dependencies is currently only supported for Rust files. \
+No dependency data will be included for {} files.",
+            "Warning".yellow().bold(),
+            lang.as_deref().unwrap_or("non-Rust")
+        );
+    }
+
     // Parse and validate symbol kind — error on unrecognised values (REF-60)
     let kind = if let Some(s) = kind_str.as_deref() {
         let capitalized = {
@@ -123,12 +142,8 @@ pub(super) fn handle_query(
     // 3. If --paths is set and user didn't specify --limit: no limit (None)
     // 4. If user specified --limit: use that value
     // 5. Otherwise: use default limit of 100
-    let final_limit = if count_only {
-        None // --count always shows total count, no pagination
-    } else if all {
-        None // --all means no limit
-    } else if paths_only && limit.is_none() {
-        None // --paths without explicit --limit means no limit
+    let final_limit = if count_only || all || (paths_only && limit.is_none()) {
+        None // --count, --all, and --paths (without explicit --limit) all remove the result limit
     } else if let Some(user_limit) = limit {
         Some(user_limit) // Use user-specified limit
     } else {
@@ -537,7 +552,7 @@ pub(super) fn handle_query(
                                         (&content_reader_opt, file_id_for_context)
                                     {
                                         reader
-                                            .get_context_by_line(fid as u32, r.span.start_line, 3)
+                                            .get_context_by_line(fid, r.span.start_line, 3)
                                             .unwrap_or_else(|_| (vec![], vec![]))
                                     } else {
                                         (vec![], vec![])

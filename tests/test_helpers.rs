@@ -1,6 +1,7 @@
 //! Test Helper Functions for Corpus-Based Testing
 //!
 //! This module provides utilities for testing Reflex against the test corpus.
+#![allow(dead_code)] // helper functions used selectively across test files
 
 use reflex::{
     CacheManager, IndexConfig, Indexer, QueryEngine, QueryFilter, SearchResult, SymbolKind,

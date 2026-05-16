@@ -373,16 +373,16 @@ pub fn generate_site(cache: &CacheManager, config: &SiteConfig) -> Result<SiteRe
         }
 
         // Changelog narration task (single task for entire changelog)
-        if let Some(ref cl) = changelog_data {
-            if !cl.raw_commits.is_empty() {
-                let ctx = changelog::build_changelog_context(&cl.raw_commits, &cl.branch);
-                narration_tasks.push(narrate::NarrationTask {
-                    system_prompt: narrate::changelog_system_prompt(),
-                    structural_context: ctx,
-                    snapshot_id: snapshot_id.to_string(),
-                    cache_key_suffix: "changelog".to_string(),
-                });
-            }
+        if let Some(ref cl) = changelog_data
+            && !cl.raw_commits.is_empty()
+        {
+            let ctx = changelog::build_changelog_context(&cl.raw_commits, &cl.branch);
+            narration_tasks.push(narrate::NarrationTask {
+                system_prompt: narrate::changelog_system_prompt(),
+                structural_context: ctx,
+                snapshot_id: snapshot_id.to_string(),
+                cache_key_suffix: "changelog".to_string(),
+            });
         }
 
         // Architecture narrative task
@@ -422,16 +422,16 @@ pub fn generate_site(cache: &CacheManager, config: &SiteConfig) -> Result<SiteRe
         // document containing the intro + 10-15 concepts with categories and
         // related modules. Cache key bumped to `-v3` so v2 cache entries are
         // bypassed.
-        if let Some(ref evidence) = glossary_evidence {
-            if !evidence.modules.is_empty() {
-                let concepts_ctx = glossary::build_concepts_context(evidence, &config.title);
-                narration_tasks.push(narrate::NarrationTask {
-                    system_prompt: narrate::concepts_system_prompt(),
-                    structural_context: concepts_ctx,
-                    snapshot_id: snapshot_id.to_string(),
-                    cache_key_suffix: "concepts-product-v3".to_string(),
-                });
-            }
+        if let Some(ref evidence) = glossary_evidence
+            && !evidence.modules.is_empty()
+        {
+            let concepts_ctx = glossary::build_concepts_context(evidence, &config.title);
+            narration_tasks.push(narrate::NarrationTask {
+                system_prompt: narrate::concepts_system_prompt(),
+                structural_context: concepts_ctx,
+                snapshot_id: snapshot_id.to_string(),
+                cache_key_suffix: "concepts-product-v3".to_string(),
+            });
         }
 
         // Project overview task
@@ -476,12 +476,12 @@ pub fn generate_site(cache: &CacheManager, config: &SiteConfig) -> Result<SiteRe
         }
 
         // Fill changelog narration
-        if let Some(ref mut cl) = changelog_data {
-            if let Some(Some(text)) = result_map.get("changelog") {
-                cl.entries = changelog::parse_changelog_response(text, &cl.raw_commits);
-                cl.narrated = true;
-                has_narration = true;
-            }
+        if let Some(ref mut cl) = changelog_data
+            && let Some(Some(text)) = result_map.get("changelog")
+        {
+            cl.entries = changelog::parse_changelog_response(text, &cl.raw_commits);
+            cl.narrated = true;
+            has_narration = true;
         }
 
         // Extract architecture narrative and project overview
@@ -499,22 +499,22 @@ pub fn generate_site(cache: &CacheManager, config: &SiteConfig) -> Result<SiteRe
         }
 
         // Fill onboard narration
-        if let Some(ref mut ob_data) = onboard_data {
-            if let Some(response) = result_map.get("onboard-guide") {
-                ob_data.narration = response.clone();
-                if ob_data.narration.is_some() {
-                    has_narration = true;
-                }
+        if let Some(ref mut ob_data) = onboard_data
+            && let Some(response) = result_map.get("onboard-guide")
+        {
+            ob_data.narration = response.clone();
+            if ob_data.narration.is_some() {
+                has_narration = true;
             }
         }
 
         // Fill timeline narration
-        if let Some(ref mut tl_data) = timeline_data {
-            if let Some(response) = result_map.get("timeline-summary") {
-                tl_data.narration = response.clone();
-                if tl_data.narration.is_some() {
-                    has_narration = true;
-                }
+        if let Some(ref mut tl_data) = timeline_data
+            && let Some(response) = result_map.get("timeline-summary")
+        {
+            tl_data.narration = response.clone();
+            if tl_data.narration.is_some() {
+                has_narration = true;
             }
         }
 
@@ -543,10 +543,10 @@ pub fn generate_site(cache: &CacheManager, config: &SiteConfig) -> Result<SiteRe
 
         // Update wiki page index descriptions with summaries
         for (i, pwc) in wiki_pages_with_context.iter().enumerate() {
-            if let Some(summary) = &pwc.page.sections.summary {
-                if i < wiki_page_index.len() {
-                    wiki_page_index[i].description = summary.chars().take(200).collect();
-                }
+            if let Some(summary) = &pwc.page.sections.summary
+                && i < wiki_page_index.len()
+            {
+                wiki_page_index[i].description = summary.chars().take(200).collect();
             }
         }
     }
@@ -1879,13 +1879,13 @@ fn write_home_page(
             "<div class=\"stat-card\"><div class=\"stat-value\">{}</div><div class=\"stat-label\">Languages</div></div>\n",
             ob.project_stats.languages.len()
         ));
-        if let Some(tl) = timeline_data {
-            if !tl.contributors.is_empty() {
-                content.push_str(&format!(
+        if let Some(tl) = timeline_data
+            && !tl.contributors.is_empty()
+        {
+            content.push_str(&format!(
                     "<div class=\"stat-card\"><div class=\"stat-value\">{}</div><div class=\"stat-label\">Contributors</div></div>\n",
                     tl.contributors.len()
                 ));
-            }
         }
         content.push_str("</div>\n\n");
 
@@ -1925,29 +1925,29 @@ fn write_home_page(
     content.push_str("</div>\n\n");
 
     // Recent activity summary (from timeline)
-    if let Some(tl) = timeline_data {
-        if !tl.weekly_summaries.is_empty() {
-            content.push_str("## Recent Activity\n\n");
-            if let Some(week) = tl.weekly_summaries.first() {
-                content.push_str(&format!(
-                    "Week of {}: **{}** commits across **{}** files by **{}** contributors.\n\n",
-                    week.week_start,
-                    week.commit_count,
-                    week.files_changed,
-                    week.contributors.len()
-                ));
-            }
-            if !tl.churn.is_empty() {
-                content.push_str("Most active files: ");
-                let top: Vec<String> = tl
-                    .churn
-                    .iter()
-                    .take(5)
-                    .map(|f| format!("`{}`", f.path))
-                    .collect();
-                content.push_str(&top.join(", "));
-                content.push_str("\n\n");
-            }
+    if let Some(tl) = timeline_data
+        && !tl.weekly_summaries.is_empty()
+    {
+        content.push_str("## Recent Activity\n\n");
+        if let Some(week) = tl.weekly_summaries.first() {
+            content.push_str(&format!(
+                "Week of {}: **{}** commits across **{}** files by **{}** contributors.\n\n",
+                week.week_start,
+                week.commit_count,
+                week.files_changed,
+                week.contributors.len()
+            ));
+        }
+        if !tl.churn.is_empty() {
+            content.push_str("Most active files: ");
+            let top: Vec<String> = tl
+                .churn
+                .iter()
+                .take(5)
+                .map(|f| format!("`{}`", f.path))
+                .collect();
+            content.push_str(&top.join(", "));
+            content.push_str("\n\n");
         }
     }
 
@@ -2065,10 +2065,10 @@ fn write_wiki_page(
         content.push_str(&format!("total_lines = {}\n", m.total_lines));
         content.push_str(&format!("languages = \"{}\"\n", m.languages.join(", ")));
         // Parent path for breadcrumb navigation (Tier 2 modules)
-        if m.tier == 2 {
-            if let Some(parent) = page.module_path.split('/').next() {
-                content.push_str(&format!("parent_path = \"{}\"\n", parent));
-            }
+        if m.tier == 2
+            && let Some(parent) = page.module_path.split('/').next()
+        {
+            content.push_str(&format!("parent_path = \"{}\"\n", parent));
         }
     }
     if has_mermaid {
@@ -2130,13 +2130,9 @@ fn write_wiki_page(
 fn write_changelog_page(
     output_dir: &Path,
     changelog_md: &str,
-    changelog_data: &changelog::Changelog,
+    _changelog_data: &changelog::Changelog,
 ) -> Result<()> {
-    let title = if changelog_data.narrated {
-        "Changelog"
-    } else {
-        "Changelog"
-    };
+    let title = "Changelog";
 
     let mut index_content = String::new();
     index_content.push_str("+++\n");
@@ -2327,8 +2323,8 @@ fn build_project_overview_context(cache: &CacheManager, wiki_pages: &[WikiPageMe
         // Language distribution
         if let Ok(mut stmt) = conn.prepare(
             "SELECT COALESCE(language, 'other'), COUNT(*) FROM files GROUP BY language ORDER BY COUNT(*) DESC LIMIT 10"
-        ) {
-            if let Ok(rows) = stmt.query_map([], |row| {
+        )
+            && let Ok(rows) = stmt.query_map([], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, usize>(1)?))
             }) {
                 ctx.push_str("Languages:\n");
@@ -2337,7 +2333,6 @@ fn build_project_overview_context(cache: &CacheManager, wiki_pages: &[WikiPageMe
                 }
                 ctx.push('\n');
             }
-        }
 
         // Dependency stats
         if let Ok(edge_count) = conn.query_row::<usize, _, _>(
@@ -2420,27 +2415,26 @@ fn build_architecture_context(cache: &CacheManager, wiki_pages: &[WikiPageMeta])
              JOIN files f1 ON fd.file_id = f1.id
              JOIN files f2 ON fd.resolved_file_id = f2.id
              WHERE f1.path LIKE ?1 AND f2.path NOT LIKE ?1",
-        ) {
-            if let Ok(dep_files) = stmt.query_map([&pattern], |row| row.get::<_, String>(0)) {
-                let dep_files: Vec<String> = dep_files.flatten().collect();
-                // Map files to modules
-                let mut target_modules = std::collections::HashMap::new();
-                for dep_file in &dep_files {
-                    for target in &modules {
-                        let target_path = target.title.trim_end_matches('/');
-                        if dep_file.starts_with(&format!("{}/", target_path)) {
-                            *target_modules
-                                .entry(target_path.to_string())
-                                .or_insert(0usize) += 1;
-                        }
+        ) && let Ok(dep_files) = stmt.query_map([&pattern], |row| row.get::<_, String>(0))
+        {
+            let dep_files: Vec<String> = dep_files.flatten().collect();
+            // Map files to modules
+            let mut target_modules = std::collections::HashMap::new();
+            for dep_file in &dep_files {
+                for target in &modules {
+                    let target_path = target.title.trim_end_matches('/');
+                    if dep_file.starts_with(&format!("{}/", target_path)) {
+                        *target_modules
+                            .entry(target_path.to_string())
+                            .or_insert(0usize) += 1;
                     }
                 }
-                for (target, count) in &target_modules {
-                    ctx.push_str(&format!(
-                        "- {} → {} ({} file edges)\n",
-                        source_path, target, count
-                    ));
-                }
+            }
+            for (target, count) in &target_modules {
+                ctx.push_str(&format!(
+                    "- {} → {} ({} file edges)\n",
+                    source_path, target, count
+                ));
             }
         }
     }
@@ -2456,13 +2450,11 @@ fn build_architecture_context(cache: &CacheManager, wiki_pages: &[WikiPageMeta])
          GROUP BY fd.resolved_file_id
          ORDER BY dep_count DESC
          LIMIT 10",
-    ) {
-        if let Ok(rows) = stmt.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, usize>(1)?))
-        }) {
-            for row in rows.flatten() {
-                ctx.push_str(&format!("- {} ({} dependents)\n", row.0, row.1));
-            }
+    ) && let Ok(rows) = stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, usize>(1)?))
+    }) {
+        for row in rows.flatten() {
+            ctx.push_str(&format!("- {} ({} dependents)\n", row.0, row.1));
         }
     }
 

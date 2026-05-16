@@ -48,8 +48,8 @@ pub(super) fn handle_snapshot_list(json: bool, pretty: bool) -> Result<()> {
             return Ok(());
         }
         println!(
-            "{:<20} {:>6} {:>8} {:>6}  {}",
-            "ID", "Files", "Lines", "Edges", "Branch"
+            "{:<20} {:>6} {:>8} {:>6}  Branch",
+            "ID", "Files", "Lines", "Edges"
         );
         println!("{}", "-".repeat(60));
         for s in &snapshots {

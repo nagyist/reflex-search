@@ -436,26 +436,26 @@ async fn phase_3_generate(
 
     // Parse response - could be AgenticResponse or QueryResponse
     // Try AgenticResponse first (for agentic mode)
-    if let Ok(agentic_response) = serde_json::from_str::<AgenticResponse>(&json_response) {
-        if agentic_response.phase == Phase::Final {
-            let confidence = agentic_response.confidence;
+    if let Ok(agentic_response) = serde_json::from_str::<AgenticResponse>(&json_response)
+        && agentic_response.phase == Phase::Final
+    {
+        let confidence = agentic_response.confidence;
 
-            // Report generation with reasoning
-            reporter.report_generation(
-                Some(&agentic_response.reasoning),
-                agentic_response.queries.len(),
-                confidence,
-            );
+        // Report generation with reasoning
+        reporter.report_generation(
+            Some(&agentic_response.reasoning),
+            agentic_response.queries.len(),
+            confidence,
+        );
 
-            // Convert to QueryResponse and return with confidence
-            return Ok((
-                QueryResponse {
-                    queries: agentic_response.queries,
-                    message: None,
-                },
-                confidence,
-            ));
-        }
+        // Convert to QueryResponse and return with confidence
+        return Ok((
+            QueryResponse {
+                queries: agentic_response.queries,
+                message: None,
+            },
+            confidence,
+        ));
     }
 
     // Fallback: try direct QueryResponse
@@ -472,6 +472,7 @@ async fn phase_3_generate(
 }
 
 /// Phase 6: Refine queries based on evaluation
+#[allow(clippy::too_many_arguments)]
 async fn phase_6_refine(
     question: &str,
     gathered_context: &str,

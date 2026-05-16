@@ -130,7 +130,7 @@ fn extract_annotations(
         let mut class_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &def_query.capture_names()[capture.index as usize];
+            let capture_name: &str = def_query.capture_names()[capture.index as usize];
             match capture_name {
                 "name" => {
                     name = Some(
@@ -263,7 +263,7 @@ fn extract_functions(
         let mut method_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             match capture_name {
                 "class_name" => {
                     scope_name = Some(
@@ -365,7 +365,7 @@ fn extract_properties(
         let mut property_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             match capture_name {
                 "class_name" => {
                     scope_name = Some(
@@ -455,7 +455,7 @@ fn extract_local_variables(
         let mut var_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             match capture_name {
                 "name" => {
                     name = Some(
@@ -542,7 +542,7 @@ fn extract_symbols(
         let mut full_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             if capture_name == "name" {
                 name = Some(
                     capture
@@ -594,10 +594,191 @@ fn extract_preview(source: &str, span: &Span) -> String {
     let lines: Vec<&str> = source.lines().collect();
 
     // Extract 7 lines: the start line and 6 following lines
-    let start_idx = (span.start_line - 1) as usize; // Convert back to 0-indexed
+    let start_idx = span.start_line - 1; // Convert back to 0-indexed
     let end_idx = (start_idx + 7).min(lines.len());
 
     lines[start_idx..end_idx].join("\n")
+}
+
+// ============================================================================
+// Dependency Extraction
+// ============================================================================
+
+use crate::models::ImportType;
+use crate::parsers::{DependencyExtractor, ImportInfo};
+
+/// Kotlin dependency extractor
+pub struct KotlinDependencyExtractor;
+
+impl DependencyExtractor for KotlinDependencyExtractor {
+    fn extract_dependencies(source: &str) -> Result<Vec<ImportInfo>> {
+        let mut parser = Parser::new();
+        let language = tree_sitter_kotlin_ng::LANGUAGE;
+
+        parser
+            .set_language(&language.into())
+            .context("Failed to set Kotlin language")?;
+
+        let tree = parser
+            .parse(source, None)
+            .context("Failed to parse Kotlin source")?;
+
+        let root_node = tree.root_node();
+
+        let mut imports = Vec::new();
+
+        // Extract import statements using tree-sitter
+        imports.extend(extract_kotlin_imports(source, &root_node)?);
+
+        Ok(imports)
+    }
+}
+
+/// Extract Kotlin import statements
+/// Uses improved text parsing since tree-sitter-kotlin-ng has non-standard node types
+fn extract_kotlin_imports(source: &str, _root: &tree_sitter::Node) -> Result<Vec<ImportInfo>> {
+    let mut imports = Vec::new();
+
+    // Parse import statements line by line (improved from previous version)
+    for (line_idx, line) in source.lines().enumerate() {
+        let trimmed = line.trim();
+
+        // Check if line starts with "import " and isn't a comment
+        if trimmed.starts_with("import ")
+            && !trimmed.starts_with("//")
+            && let Some(import_path) = extract_import_path_from_header(trimmed)
+        {
+            let import_type = classify_kotlin_import(&import_path);
+            let line_number = line_idx + 1;
+
+            imports.push(ImportInfo {
+                imported_path: import_path,
+                line_number,
+                import_type,
+                imported_symbols: None,
+            });
+        }
+    }
+
+    Ok(imports)
+}
+
+/// Extract import path from import_header text
+/// Examples:
+///   "import java.util.List" -> "java.util.List"
+///   "import kotlinx.coroutines.*" -> "kotlinx.coroutines"
+///   "import com.example.Foo as Bar" -> "com.example.Foo"
+fn extract_import_path_from_header(text: &str) -> Option<String> {
+    let trimmed = text.trim();
+
+    // Remove "import" keyword
+    let after_import = trimmed.strip_prefix("import")?;
+    let after_import = after_import.trim();
+
+    // Find the end of the import path (before 'as' or wildcard)
+    let end_pos = after_import
+        .find(" as ")
+        .or_else(|| after_import.find(".*"))
+        .unwrap_or(after_import.len());
+
+    let path = after_import[..end_pos].trim();
+
+    // Remove trailing wildcard if present
+    let path = path.trim_end_matches(".*");
+
+    if path.is_empty() {
+        None
+    } else {
+        Some(path.to_string())
+    }
+}
+
+/// Extract import path from text like "import java.util.List" or "import kotlinx.coroutines.*"
+#[allow(dead_code)]
+fn extract_import_path_from_text(text: &str) -> Option<String> {
+    // Remove "import" keyword and whitespace
+    let trimmed = text.trim();
+    if !trimmed.starts_with("import") {
+        return None;
+    }
+
+    let after_import = trimmed[6..].trim(); // Skip "import"
+
+    // Find the end of the import path (before any 'as' alias or comments)
+    let end_pos = after_import
+        .find(" as ")
+        .or_else(|| after_import.find("//"))
+        .or_else(|| after_import.find("/*"))
+        .unwrap_or(after_import.len());
+
+    let path = after_import[..end_pos].trim();
+
+    // Remove trailing wildcard if present
+    let path = path.trim_end_matches(".*");
+
+    if path.is_empty() {
+        None
+    } else {
+        Some(path.to_string())
+    }
+}
+
+/// Reclassify a Kotlin import using the project's package prefix
+/// Similar to reclassify_go_import() and reclassify_java_import()
+pub fn reclassify_kotlin_import(import_path: &str, package_prefix: Option<&str>) -> ImportType {
+    classify_kotlin_import_impl(import_path, package_prefix)
+}
+
+/// Classify Kotlin imports into Internal/External/Stdlib
+fn classify_kotlin_import(import_path: &str) -> ImportType {
+    classify_kotlin_import_impl(import_path, None)
+}
+
+fn classify_kotlin_import_impl(import_path: &str, package_prefix: Option<&str>) -> ImportType {
+    // First check if this is an internal import (matches project package)
+    if let Some(prefix) = package_prefix
+        && import_path.starts_with(prefix)
+    {
+        return ImportType::Internal;
+    }
+
+    // Java standard library
+    if import_path.starts_with("java.") || import_path.starts_with("javax.") {
+        return ImportType::Stdlib;
+    }
+
+    // Kotlin standard library
+    if import_path.starts_with("kotlin.") {
+        return ImportType::Stdlib;
+    }
+
+    // Android SDK
+    if import_path.starts_with("android.") || import_path.starts_with("androidx.") {
+        return ImportType::Stdlib;
+    }
+
+    // Common external libraries
+    let external_prefixes = [
+        "kotlinx.",
+        "com.google.",
+        "org.jetbrains.",
+        "io.ktor.",
+        "com.squareup.",
+        "retrofit2.",
+        "okhttp3.",
+        "com.jakewharton.",
+        "org.koin.",
+        "com.github.",
+    ];
+
+    for prefix in &external_prefixes {
+        if import_path.starts_with(prefix) {
+            return ImportType::External;
+        }
+    }
+
+    // Default to external for unknown packages
+    ImportType::External
 }
 
 #[cfg(test)]
@@ -691,7 +872,7 @@ class Calculator {
         );
 
         // Check scope
-        for method in method_symbols {
+        for _method in method_symbols {
             // Removed: scope field no longer exists: assert_eq!(method.scope.as_ref().unwrap(), "class Calculator");
         }
     }
@@ -769,7 +950,7 @@ sealed class Result {
             .collect();
 
         // Should find Result, Success, and Error
-        assert!(class_symbols.len() >= 1);
+        assert!(!class_symbols.is_empty());
         assert!(
             class_symbols
                 .iter()
@@ -943,7 +1124,7 @@ fun topLevel(): String {
         }
 
         // Verify that class property has scope
-        let multiplier = variables
+        let _multiplier = variables
             .iter()
             .find(|v| v.symbol.as_deref() == Some("multiplier"))
             .unwrap();
@@ -971,7 +1152,7 @@ annotation class Composable
             .collect();
 
         // Should find Test, Entity, and Composable annotation classes
-        assert!(annotation_symbols.len() >= 1);
+        assert!(!annotation_symbols.is_empty());
         // Note: The exact number depends on whether tree-sitter captures nested annotations
         // We verify at least one is captured
     }
@@ -1104,183 +1285,4 @@ class MyViewModel {
             "android.os.Bundle should be classified as Stdlib"
         );
     }
-}
-
-// ============================================================================
-// Dependency Extraction
-// ============================================================================
-
-use crate::models::ImportType;
-use crate::parsers::{DependencyExtractor, ImportInfo};
-
-/// Kotlin dependency extractor
-pub struct KotlinDependencyExtractor;
-
-impl DependencyExtractor for KotlinDependencyExtractor {
-    fn extract_dependencies(source: &str) -> Result<Vec<ImportInfo>> {
-        let mut parser = Parser::new();
-        let language = tree_sitter_kotlin_ng::LANGUAGE;
-
-        parser
-            .set_language(&language.into())
-            .context("Failed to set Kotlin language")?;
-
-        let tree = parser
-            .parse(source, None)
-            .context("Failed to parse Kotlin source")?;
-
-        let root_node = tree.root_node();
-
-        let mut imports = Vec::new();
-
-        // Extract import statements using tree-sitter
-        imports.extend(extract_kotlin_imports(source, &root_node)?);
-
-        Ok(imports)
-    }
-}
-
-/// Extract Kotlin import statements
-/// Uses improved text parsing since tree-sitter-kotlin-ng has non-standard node types
-fn extract_kotlin_imports(source: &str, _root: &tree_sitter::Node) -> Result<Vec<ImportInfo>> {
-    let mut imports = Vec::new();
-
-    // Parse import statements line by line (improved from previous version)
-    for (line_idx, line) in source.lines().enumerate() {
-        let trimmed = line.trim();
-
-        // Check if line starts with "import " and isn't a comment
-        if trimmed.starts_with("import ") && !trimmed.starts_with("//") {
-            if let Some(import_path) = extract_import_path_from_header(trimmed) {
-                let import_type = classify_kotlin_import(&import_path);
-                let line_number = line_idx + 1;
-
-                imports.push(ImportInfo {
-                    imported_path: import_path,
-                    line_number,
-                    import_type,
-                    imported_symbols: None,
-                });
-            }
-        }
-    }
-
-    Ok(imports)
-}
-
-/// Extract import path from import_header text
-/// Examples:
-///   "import java.util.List" -> "java.util.List"
-///   "import kotlinx.coroutines.*" -> "kotlinx.coroutines"
-///   "import com.example.Foo as Bar" -> "com.example.Foo"
-fn extract_import_path_from_header(text: &str) -> Option<String> {
-    let trimmed = text.trim();
-
-    // Remove "import" keyword
-    let after_import = trimmed.strip_prefix("import")?;
-    let after_import = after_import.trim();
-
-    // Find the end of the import path (before 'as' or wildcard)
-    let end_pos = after_import
-        .find(" as ")
-        .or_else(|| after_import.find(".*"))
-        .unwrap_or(after_import.len());
-
-    let path = after_import[..end_pos].trim();
-
-    // Remove trailing wildcard if present
-    let path = path.trim_end_matches(".*");
-
-    if path.is_empty() {
-        None
-    } else {
-        Some(path.to_string())
-    }
-}
-
-/// Extract import path from text like "import java.util.List" or "import kotlinx.coroutines.*"
-fn extract_import_path_from_text(text: &str) -> Option<String> {
-    // Remove "import" keyword and whitespace
-    let trimmed = text.trim();
-    if !trimmed.starts_with("import") {
-        return None;
-    }
-
-    let after_import = trimmed[6..].trim(); // Skip "import"
-
-    // Find the end of the import path (before any 'as' alias or comments)
-    let end_pos = after_import
-        .find(" as ")
-        .or_else(|| after_import.find("//"))
-        .or_else(|| after_import.find("/*"))
-        .unwrap_or(after_import.len());
-
-    let path = after_import[..end_pos].trim();
-
-    // Remove trailing wildcard if present
-    let path = path.trim_end_matches(".*");
-
-    if path.is_empty() {
-        None
-    } else {
-        Some(path.to_string())
-    }
-}
-
-/// Reclassify a Kotlin import using the project's package prefix
-/// Similar to reclassify_go_import() and reclassify_java_import()
-pub fn reclassify_kotlin_import(import_path: &str, package_prefix: Option<&str>) -> ImportType {
-    classify_kotlin_import_impl(import_path, package_prefix)
-}
-
-/// Classify Kotlin imports into Internal/External/Stdlib
-fn classify_kotlin_import(import_path: &str) -> ImportType {
-    classify_kotlin_import_impl(import_path, None)
-}
-
-fn classify_kotlin_import_impl(import_path: &str, package_prefix: Option<&str>) -> ImportType {
-    // First check if this is an internal import (matches project package)
-    if let Some(prefix) = package_prefix {
-        if import_path.starts_with(prefix) {
-            return ImportType::Internal;
-        }
-    }
-
-    // Java standard library
-    if import_path.starts_with("java.") || import_path.starts_with("javax.") {
-        return ImportType::Stdlib;
-    }
-
-    // Kotlin standard library
-    if import_path.starts_with("kotlin.") {
-        return ImportType::Stdlib;
-    }
-
-    // Android SDK
-    if import_path.starts_with("android.") || import_path.starts_with("androidx.") {
-        return ImportType::Stdlib;
-    }
-
-    // Common external libraries
-    let external_prefixes = [
-        "kotlinx.",
-        "com.google.",
-        "org.jetbrains.",
-        "io.ktor.",
-        "com.squareup.",
-        "retrofit2.",
-        "okhttp3.",
-        "com.jakewharton.",
-        "org.koin.",
-        "com.github.",
-    ];
-
-    for prefix in &external_prefixes {
-        if import_path.starts_with(prefix) {
-            return ImportType::External;
-        }
-    }
-
-    // Default to external for unknown packages
-    ImportType::External
 }

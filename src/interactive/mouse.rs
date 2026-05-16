@@ -1,3 +1,5 @@
+#![allow(dead_code)] // TUI refactor in progress
+
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 use std::cell::Cell;
@@ -151,17 +153,17 @@ impl MouseState {
                 }
 
                 // Check results area (click to select)
-                if self.is_in_area(result_area) {
-                    if let Some(row) = self.row_in_area(result_area) {
-                        // Subtract 1 to account for top border of the List widget
-                        if row > 0 {
-                            let content_row = row - 1;
-                            return if is_double_click {
-                                MouseAction::DoubleClick(content_row)
-                            } else {
-                                MouseAction::SelectResult(content_row)
-                            };
-                        }
+                if self.is_in_area(result_area)
+                    && let Some(row) = self.row_in_area(result_area)
+                {
+                    // Subtract 1 to account for top border of the List widget
+                    if row > 0 {
+                        let content_row = row - 1;
+                        return if is_double_click {
+                            MouseAction::DoubleClick(content_row)
+                        } else {
+                            MouseAction::SelectResult(content_row)
+                        };
                     }
                 }
 
@@ -182,12 +184,12 @@ impl MouseState {
                 }
             }
             MouseEventKind::Moved => {
-                if self.is_in_area(result_area) {
-                    if let Some(row) = self.row_in_area(result_area) {
-                        self.hovering = true;
-                        self.hover_index = Some(row);
-                        return MouseAction::Hover(row);
-                    }
+                if self.is_in_area(result_area)
+                    && let Some(row) = self.row_in_area(result_area)
+                {
+                    self.hovering = true;
+                    self.hover_index = Some(row);
+                    return MouseAction::Hover(row);
                 }
                 self.hovering = false;
                 self.hover_index = None;

@@ -287,7 +287,7 @@ mod tests {
         let selector = FilterSelector::new_language();
         assert_eq!(selector.selector_type, FilterSelectorType::Language);
         assert_eq!(selector.selected_index, 0);
-        assert!(selector.options.len() > 0);
+        assert!(!selector.options.is_empty());
     }
 
     #[test]
@@ -295,7 +295,7 @@ mod tests {
         let selector = FilterSelector::new_kind();
         assert_eq!(selector.selector_type, FilterSelectorType::Kind);
         assert_eq!(selector.selected_index, 0);
-        assert!(selector.options.len() > 0);
+        assert!(!selector.options.is_empty());
     }
 
     #[test]

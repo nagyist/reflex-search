@@ -138,7 +138,7 @@ fn extract_impls(source: &str, root: &tree_sitter::Node) -> Result<Vec<SearchRes
         let mut method_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             match capture_name {
                 "impl_name" => {
                     impl_name = Some(
@@ -296,7 +296,7 @@ fn extract_attributes(source: &str, root: &tree_sitter::Node) -> Result<Vec<Sear
         let mut func_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &func_query.capture_names()[capture.index as usize];
+            let capture_name: &str = func_query.capture_names()[capture.index as usize];
             match capture_name {
                 "name" => {
                     name = Some(
@@ -321,11 +321,11 @@ fn extract_attributes(source: &str, root: &tree_sitter::Node) -> Result<Vec<Sear
             if let Some(parent) = func_node.parent() {
                 let mut func_index = None;
                 for i in 0..parent.child_count() {
-                    if let Some(child) = parent.child(i as u32) {
-                        if child.id() == func_node.id() {
-                            func_index = Some(i);
-                            break;
-                        }
+                    if let Some(child) = parent.child(i as u32)
+                        && child.id() == func_node.id()
+                    {
+                        func_index = Some(i);
+                        break;
                     }
                 }
 
@@ -382,7 +382,7 @@ fn extract_attributes(source: &str, root: &tree_sitter::Node) -> Result<Vec<Sear
         let mut attr_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &attr_query.capture_names()[capture.index as usize];
+            let capture_name: &str = attr_query.capture_names()[capture.index as usize];
             match capture_name {
                 "attr_name" => {
                     attr_name = Some(
@@ -438,7 +438,7 @@ fn extract_symbols(
         let mut full_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             if capture_name == "name" {
                 name = Some(
                     capture
@@ -491,7 +491,7 @@ fn extract_preview(source: &str, span: &Span) -> String {
 
     // Extract 7 lines: the start line and 6 following lines
     // This provides enough context for AI agents to understand the code
-    let start_idx = (span.start_line - 1) as usize; // Convert back to 0-indexed
+    let start_idx = span.start_line - 1; // Convert back to 0-indexed
     let end_idx = (start_idx + 7).min(lines.len());
 
     lines[start_idx..end_idx].join("\n")
@@ -591,7 +591,7 @@ fn extract_mod_items(source: &str, root: &tree_sitter::Node) -> Result<Vec<Impor
         let mut mod_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             match capture_name {
                 "name" => {
                     name = Some(
@@ -652,7 +652,7 @@ fn extract_extern_crates(source: &str, root: &tree_sitter::Node) -> Result<Vec<I
         let mut extern_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             match capture_name {
                 "name" => {
                     name = Some(
@@ -1350,10 +1350,10 @@ fn find_crate_root(start_path: &str) -> Option<String> {
 
         // For test paths that don't exist, assume standard Rust structure:
         // If we find "/src" in the path, the parent of "src" is likely the crate root
-        if current.ends_with("src") {
-            if let Some(parent) = current.parent() {
-                return Some(parent.to_string_lossy().to_string());
-            }
+        if current.ends_with("src")
+            && let Some(parent) = current.parent()
+        {
+            return Some(parent.to_string_lossy().to_string());
         }
 
         // Move up to parent directory
@@ -1642,13 +1642,13 @@ pub fn parse_all_rust_crates(root: &std::path::Path) -> anyhow::Result<Vec<RustC
         let entry = entry?;
         if entry.file_name() == "Cargo.toml" {
             let content = std::fs::read_to_string(entry.path())?;
-            if let Some(name) = extract_crate_name(&content) {
-                if let Some(crate_root) = entry.path().parent() {
-                    crates.push(RustCrate {
-                        name,
-                        root_path: crate_root.to_path_buf(),
-                    });
-                }
+            if let Some(name) = extract_crate_name(&content)
+                && let Some(crate_root) = entry.path().parent()
+            {
+                crates.push(RustCrate {
+                    name,
+                    root_path: crate_root.to_path_buf(),
+                });
             }
         }
     }
@@ -1710,21 +1710,19 @@ pub fn resolve_rust_workspace_path(import_path: &str, crates: &[RustCrate]) -> O
                 let parts: Vec<&str> = relative_module.split("::").collect();
 
                 // Try resolving as a module file (only accept if the file exists)
-                if let Some(path) = resolve_rust_module_path(&src_root, &parts) {
-                    if std::path::Path::new(&path).exists() {
-                        return Some(path);
-                    }
+                if let Some(path) = resolve_rust_module_path(&src_root, &parts)
+                    && std::path::Path::new(&path).exists()
+                {
+                    return Some(path);
                 }
 
                 // Try popping the last component (it may be an item like a struct/fn, not a module)
-                if parts.len() > 1 {
-                    if let Some(path) =
+                if parts.len() > 1
+                    && let Some(path) =
                         resolve_rust_module_path(&src_root, &parts[..parts.len() - 1])
-                    {
-                        if std::path::Path::new(&path).exists() {
-                            return Some(path);
-                        }
-                    }
+                    && std::path::Path::new(&path).exists()
+                {
+                    return Some(path);
                 }
 
                 // Return the best-guess path even if it doesn't exist

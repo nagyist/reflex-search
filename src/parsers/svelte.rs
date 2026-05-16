@@ -247,7 +247,7 @@ fn extract_variables(
         let mut decl_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             match capture_name {
                 "name" => {
                     name = Some(
@@ -257,10 +257,10 @@ fn extract_variables(
                             .unwrap_or("")
                             .to_string(),
                     );
-                    if let Some(parent) = capture.node.parent() {
-                        if parent.kind() == "variable_declarator" {
-                            declarator_node = Some(parent);
-                        }
+                    if let Some(parent) = capture.node.parent()
+                        && parent.kind() == "variable_declarator"
+                    {
+                        declarator_node = Some(parent);
                     }
                 }
                 "decl" => {
@@ -274,11 +274,11 @@ fn extract_variables(
             // Check if this is an arrow function (skip those, handled separately)
             let mut is_arrow_function = false;
             for i in 0..declarator.child_count() {
-                if let Some(child) = declarator.child(i as u32) {
-                    if child.kind() == "arrow_function" {
-                        is_arrow_function = true;
-                        break;
-                    }
+                if let Some(child) = declarator.child(i as u32)
+                    && child.kind() == "arrow_function"
+                {
+                    is_arrow_function = true;
+                    break;
                 }
             }
 
@@ -340,7 +340,7 @@ fn extract_reactive_declarations(
         let mut full_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             match capture_name {
                 "label" => {
                     label = Some(
@@ -368,21 +368,21 @@ fn extract_reactive_declarations(
         }
 
         // Only extract if the label is $ (Svelte reactive declaration)
-        if let (Some(label_text), Some(name), Some(node)) = (label, name, full_node) {
-            if label_text == "$" {
-                let span = node_to_span(&node, line_offset);
-                let preview = extract_preview(source, &span, line_offset);
+        if let (Some(label_text), Some(name), Some(node)) = (label, name, full_node)
+            && label_text == "$"
+        {
+            let span = node_to_span(&node, line_offset);
+            let preview = extract_preview(source, &span, line_offset);
 
-                symbols.push(SearchResult {
-                    path: String::new(),
-                    lang: Language::Svelte,
-                    kind: SymbolKind::Variable,
-                    symbol: Some(name),
-                    span,
-                    preview,
-                    dependencies: None,
-                });
-            }
+            symbols.push(SearchResult {
+                path: String::new(),
+                lang: Language::Svelte,
+                kind: SymbolKind::Variable,
+                symbol: Some(name),
+                span,
+                preview,
+                dependencies: None,
+            });
         }
     }
 
@@ -408,7 +408,7 @@ fn extract_symbols(
         let mut full_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             if capture_name == "name" {
                 name = Some(
                     capture
@@ -459,7 +459,7 @@ fn extract_preview(source: &str, span: &Span, line_offset: usize) -> String {
     let lines: Vec<&str> = source.lines().collect();
 
     // Adjust for the line offset - we're working with the script block content
-    let start_idx = (span.start_line - 1 - line_offset) as usize;
+    let start_idx = span.start_line - 1 - line_offset;
     let end_idx = (start_idx + 7).min(lines.len());
 
     lines[start_idx..end_idx].join("\n")
@@ -579,7 +579,7 @@ mod tests {
         let symbols = parse("test.svelte", source).unwrap();
 
         // Should have symbols from both script blocks
-        assert!(symbols.len() > 0);
+        assert!(!symbols.is_empty());
 
         // Should have component symbols
         assert!(symbols.iter().any(|s| s.symbol.as_deref() == Some("data")));

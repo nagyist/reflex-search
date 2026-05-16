@@ -66,7 +66,7 @@ impl PathAliasMap {
             .ok_or_else(|| anyhow::anyhow!("Invalid tsconfig.json path"))?
             .to_path_buf();
 
-        let compiler_options = config.compiler_options.unwrap_or_else(|| CompilerOptions {
+        let compiler_options = config.compiler_options.unwrap_or(CompilerOptions {
             base_url: None,
             paths: None,
         });
@@ -164,11 +164,11 @@ impl PathAliasMap {
                 }
             } else {
                 // Exact match (no wildcard)
-                if import_path == alias_pattern {
-                    if let Some(target) = target_paths.first() {
-                        log::trace!("Resolved exact alias {} => {}", alias_pattern, target);
-                        return Some(target.clone());
-                    }
+                if import_path == alias_pattern
+                    && let Some(target) = target_paths.first()
+                {
+                    log::trace!("Resolved exact alias {} => {}", alias_pattern, target);
+                    return Some(target.clone());
                 }
             }
         }
@@ -188,7 +188,8 @@ impl PathAliasMap {
 
         // Normalize the path to resolve .. components without requiring file to exist
         // Example: /home/user/packages/ui/./ui => /home/user/packages/ui
-        let normalized = joined
+
+        joined
             .components()
             .fold(PathBuf::new(), |mut acc, component| {
                 match component {
@@ -202,9 +203,7 @@ impl PathAliasMap {
                         acc
                     }
                 }
-            });
-
-        normalized
+            })
     }
 }
 

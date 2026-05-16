@@ -42,33 +42,33 @@ pub async fn generate_answer(
     // Handle empty results - use gathered context if available, then codebase context
     if results.is_empty() {
         // Try gathered context first (from tools like search_documentation, gather_context)
-        if let Some(context) = gathered_context {
-            if !context.is_empty() {
-                // Generate answer from documentation/context alone
-                let prompt = build_context_only_prompt(question, context);
-                log::debug!(
-                    "Generating answer from gathered context ({} chars)",
-                    prompt.len()
-                );
-                let answer = provider.complete(&prompt, false).await?;
-                let cleaned = strip_markdown_fences(&answer);
-                return Ok(cleaned.to_string());
-            }
+        if let Some(context) = gathered_context
+            && !context.is_empty()
+        {
+            // Generate answer from documentation/context alone
+            let prompt = build_context_only_prompt(question, context);
+            log::debug!(
+                "Generating answer from gathered context ({} chars)",
+                prompt.len()
+            );
+            let answer = provider.complete(&prompt, false).await?;
+            let cleaned = strip_markdown_fences(&answer);
+            return Ok(cleaned.to_string());
         }
 
         // Try codebase context (language distribution, file counts, directories)
-        if let Some(context) = codebase_context {
-            if !context.is_empty() {
-                // Generate answer from codebase metadata alone
-                let prompt = build_codebase_context_prompt(question, context);
-                log::debug!(
-                    "Generating answer from codebase context ({} chars)",
-                    prompt.len()
-                );
-                let answer = provider.complete(&prompt, false).await?;
-                let cleaned = strip_markdown_fences(&answer);
-                return Ok(cleaned.to_string());
-            }
+        if let Some(context) = codebase_context
+            && !context.is_empty()
+        {
+            // Generate answer from codebase metadata alone
+            let prompt = build_codebase_context_prompt(question, context);
+            log::debug!(
+                "Generating answer from codebase context ({} chars)",
+                prompt.len()
+            );
+            let answer = provider.complete(&prompt, false).await?;
+            let cleaned = strip_markdown_fences(&answer);
+            return Ok(cleaned.to_string());
         }
 
         return Ok(format!("No results found for: {}", question));
@@ -104,15 +104,13 @@ fn build_answer_prompt(
     prompt.push_str(&format!("Question: {}\n\n", question));
 
     // Add gathered context if available (documentation, codebase structure)
-    if let Some(context) = gathered_context {
-        if !context.is_empty() {
-            prompt.push_str("Additional Context (from documentation and codebase analysis):\n");
-            prompt.push_str(
-                "====================================================================\n\n",
-            );
-            prompt.push_str(context);
-            prompt.push_str("\n\n");
-        }
+    if let Some(context) = gathered_context
+        && !context.is_empty()
+    {
+        prompt.push_str("Additional Context (from documentation and codebase analysis):\n");
+        prompt.push_str("====================================================================\n\n");
+        prompt.push_str(context);
+        prompt.push_str("\n\n");
     }
 
     // Add search result summary
@@ -195,7 +193,7 @@ fn build_answer_prompt(
             match_count += 1;
         }
 
-        prompt.push_str("\n");
+        prompt.push('\n');
     }
 
     // Instructions for answer format

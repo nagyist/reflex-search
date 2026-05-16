@@ -109,7 +109,7 @@ mod tests {
         assert_eq!(response.queries.len(), 1);
         assert_eq!(response.queries[0].command, "query \"TODO\"");
         assert_eq!(response.queries[0].order, 1);
-        assert_eq!(response.queries[0].merge, true);
+        assert!(response.queries[0].merge);
     }
 
     #[test]
@@ -132,8 +132,8 @@ mod tests {
         let response: QueryResponse = serde_json::from_str(json).unwrap();
         assert_eq!(response.queries.len(), 2);
         assert_eq!(response.queries[0].order, 1);
-        assert_eq!(response.queries[0].merge, false);
+        assert!(!response.queries[0].merge);
         assert_eq!(response.queries[1].order, 2);
-        assert_eq!(response.queries[1].merge, true);
+        assert!(response.queries[1].merge);
     }
 }

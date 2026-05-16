@@ -10,6 +10,8 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+type SymbolEntry = (String, String, usize, Option<String>);
+
 use crate::cache::CacheManager;
 use crate::dependency::DependencyIndex;
 use crate::models::{Language, SymbolKind};
@@ -97,10 +99,10 @@ pub fn detect_modules(
     // Tier 1: top-level directories
     for dir in &context.top_level_dirs {
         let dir_path = dir.trim_end_matches('/');
-        if let Some(module) = build_module_def(&conn, dir_path, 1)? {
-            if module.file_count >= config.min_files {
-                modules.push(module);
-            }
+        if let Some(module) = build_module_def(&conn, dir_path, 1)?
+            && module.file_count >= config.min_files
+        {
+            modules.push(module);
         }
     }
 
@@ -114,10 +116,10 @@ pub fn detect_modules(
                 if modules.iter().any(|m| m.path == sub_path) {
                     continue;
                 }
-                if let Some(module) = build_module_def(&conn, &sub_path, 2)? {
-                    if module.file_count >= config.min_files {
-                        modules.push(module);
-                    }
+                if let Some(module) = build_module_def(&conn, &sub_path, 2)?
+                    && module.file_count >= config.min_files
+                {
+                    modules.push(module);
                 }
             }
         }
@@ -128,10 +130,10 @@ pub fn detect_modules(
             if modules.iter().any(|m| m.path == path_str) {
                 continue;
             }
-            if let Some(module) = build_module_def(&conn, path_str, 2)? {
-                if module.file_count >= config.min_files {
-                    modules.push(module);
-                }
+            if let Some(module) = build_module_def(&conn, path_str, 2)?
+                && module.file_count >= config.min_files
+            {
+                modules.push(module);
             }
         }
     }
@@ -171,6 +173,7 @@ fn discover_sub_modules(conn: &Connection, parent_path: &str) -> Result<Vec<Stri
 }
 
 /// Generate a wiki page for a single module
+#[allow(clippy::too_many_arguments)]
 pub fn generate_wiki_page(
     cache: &CacheManager,
     module: &ModuleDefinition,
@@ -463,12 +466,11 @@ fn build_dependency_diagram(
          JOIN files f1 ON fd.file_id = f1.id
          JOIN files f2 ON fd.resolved_file_id = f2.id
          WHERE f1.path LIKE ?1 AND f2.path NOT LIKE ?1",
-    ) {
-        if let Ok(rows) = stmt.query_map([&pattern], |row| row.get::<_, String>(0)) {
-            for dep_file in rows.flatten() {
-                let target = find_owning_module(&dep_file, all_modules);
-                *outgoing.entry(target).or_insert(0) += 1;
-            }
+    ) && let Ok(rows) = stmt.query_map([&pattern], |row| row.get::<_, String>(0))
+    {
+        for dep_file in rows.flatten() {
+            let target = find_owning_module(&dep_file, all_modules);
+            *outgoing.entry(target).or_insert(0) += 1;
         }
     }
 
@@ -479,12 +481,11 @@ fn build_dependency_diagram(
          JOIN files f1 ON fd.file_id = f1.id
          JOIN files f2 ON fd.resolved_file_id = f2.id
          WHERE f2.path LIKE ?1 AND f1.path NOT LIKE ?1",
-    ) {
-        if let Ok(rows) = stmt.query_map([&pattern], |row| row.get::<_, String>(0)) {
-            for dep_file in rows.flatten() {
-                let source = find_owning_module(&dep_file, all_modules);
-                *incoming.entry(source).or_insert(0) += 1;
-            }
+    ) && let Ok(rows) = stmt.query_map([&pattern], |row| row.get::<_, String>(0))
+    {
+        for dep_file in rows.flatten() {
+            let source = find_owning_module(&dep_file, all_modules);
+            *incoming.entry(source).or_insert(0) += 1;
         }
     }
 
@@ -510,7 +511,7 @@ fn build_dependency_diagram(
 
     // Outgoing edges (this module depends on)
     let mut out_sorted: Vec<_> = outgoing.into_iter().collect();
-    out_sorted.sort_by(|a, b| b.1.cmp(&a.1));
+    out_sorted.sort_by_key(|a| std::cmp::Reverse(a.1));
     for (target, count) in out_sorted.iter().take(8) {
         let target_id = sanitize(target);
         diagram.push_str(&format!("    {}[\"{}/\"]\n", target_id, target));
@@ -520,7 +521,7 @@ fn build_dependency_diagram(
 
     // Incoming edges (modules that depend on this)
     let mut in_sorted: Vec<_> = incoming.into_iter().collect();
-    in_sorted.sort_by(|a, b| b.1.cmp(&a.1));
+    in_sorted.sort_by_key(|a| std::cmp::Reverse(a.1));
     for (source, count) in in_sorted.iter().take(8) {
         let source_id = sanitize(source);
         // Avoid re-declaring if already declared as outgoing target
@@ -718,7 +719,7 @@ fn build_structure_section(
 
     content.push_str("| Language | Files |\n|---|---|\n");
     let mut lang_counts: Vec<_> = by_lang.into_iter().collect();
-    lang_counts.sort_by(|a, b| b.1.cmp(&a.1));
+    lang_counts.sort_by_key(|a| std::cmp::Reverse(a.1));
     for (lang, count) in &lang_counts {
         content.push_str(&format!("| {} | {} |\n", lang, count));
     }
@@ -726,7 +727,7 @@ fn build_structure_section(
     // Subdirectory breakdown
     if !by_subdir.is_empty() {
         let mut subdirs: Vec<_> = by_subdir.into_iter().collect();
-        subdirs.sort_by(|a, b| b.1.1.cmp(&a.1.1)); // sort by lines desc
+        subdirs.sort_by_key(|a| std::cmp::Reverse(a.1.1)); // sort by lines desc
 
         content.push_str("\n### Directories\n\n");
         content.push_str("| Directory | Files | Lines |\n|---|---|---|\n");
@@ -800,7 +801,7 @@ fn build_dependencies_section(
     }
 
     let mut groups: Vec<_> = by_module.into_iter().collect();
-    groups.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+    groups.sort_by_key(|a: &(String, Vec<_>)| std::cmp::Reverse(a.1.len()));
 
     let total_files = deps.len();
     let total_modules = groups.len();
@@ -866,7 +867,7 @@ fn build_dependents_section(
     }
 
     let mut groups: Vec<_> = by_module.into_iter().collect();
-    groups.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+    groups.sort_by_key(|a: &(String, Vec<_>)| std::cmp::Reverse(a.1.len()));
 
     let total_files = dependents.len();
     let total_modules = groups.len();
@@ -1061,8 +1062,8 @@ fn extract_doc_comment(source: &str, start_line: usize, language: &Language) -> 
                 if !first_content.is_empty() {
                     doc_lines.push(first_content.to_string());
                 }
-                for j in (i + 1)..lines.len() {
-                    let line = lines[j].trim();
+                for line_raw in &lines[(i + 1)..] {
+                    let line = line_raw.trim();
                     if line.contains(quote) {
                         let before_close = line.trim_end_matches(quote).trim();
                         if !before_close.is_empty() {
@@ -1137,7 +1138,7 @@ fn extract_doc_comment(source: &str, start_line: usize, language: &Language) -> 
                     let content = trimmed.trim_start_matches('/').trim();
                     comment_lines.push(content.to_string());
                 } else if trimmed.starts_with("//!") {
-                    let content = trimmed[3..].trim().to_string();
+                    let content = trimmed.strip_prefix("//!").unwrap_or("").trim().to_string();
                     comment_lines.push(content);
                 } else {
                     break;
@@ -1153,7 +1154,7 @@ fn extract_doc_comment(source: &str, start_line: usize, language: &Language) -> 
             while idx < lines.len() {
                 let trimmed = lines[idx].trim();
                 if trimmed.starts_with("//") {
-                    let content = trimmed[2..].trim().to_string();
+                    let content = trimmed.strip_prefix("//").unwrap_or("").trim().to_string();
                     comment_lines.push(content);
                 } else {
                     break;
@@ -1339,7 +1340,7 @@ fn build_key_symbols_section(
 
     // Parse each file and collect symbols
     // kind -> [(name, path, size, doc_comment)]
-    let mut by_kind: HashMap<String, Vec<(String, String, usize, Option<String>)>> = HashMap::new();
+    let mut by_kind: HashMap<String, Vec<SymbolEntry>> = HashMap::new();
     let mut total_symbols = 0usize;
 
     for (path, lang_str) in &files {
@@ -1443,11 +1444,10 @@ fn build_key_symbols_section(
             continue;
         }
         // Skip names that start with $ (PHP variables like $data, $type)
-        if name.starts_with('$') {
-            let stripped = &name[1..];
-            if stripped.len() < 4 || SYMBOL_BLOCKLIST.contains(&stripped.to_lowercase().as_str()) {
-                continue;
-            }
+        if let Some(stripped) = name.strip_prefix('$')
+            && (stripped.len() < 4 || SYMBOL_BLOCKLIST.contains(&stripped.to_lowercase().as_str()))
+        {
+            continue;
         }
 
         // Look up span size for this symbol (larger definitions are more important)
@@ -1537,19 +1537,19 @@ fn build_key_symbols_section(
             }
 
             // Add reference file list (top 5 + overflow)
-            if let Some(files) = ref_files.get(name.as_str()) {
-                if !files.is_empty() {
-                    let show: Vec<&str> = files.iter().take(5).map(|s| s.as_str()).collect();
-                    let mut ref_line = format!(
-                        "<ul><li class=\"ref-list\">Referenced by: {}",
-                        show.join(", ")
-                    );
-                    if files.len() > 5 {
-                        ref_line.push_str(&format!(" +{} more", files.len() - 5));
-                    }
-                    ref_line.push_str("</li></ul>\n");
-                    content.push_str(&ref_line);
+            if let Some(files) = ref_files.get(name.as_str())
+                && !files.is_empty()
+            {
+                let show: Vec<&str> = files.iter().take(5).map(|s| s.as_str()).collect();
+                let mut ref_line = format!(
+                    "<ul><li class=\"ref-list\">Referenced by: {}",
+                    show.join(", ")
+                );
+                if files.len() > 5 {
+                    ref_line.push_str(&format!(" +{} more", files.len() - 5));
                 }
+                ref_line.push_str("</li></ul>\n");
+                content.push_str(&ref_line);
             }
 
             content.push_str("</li>\n");
@@ -1579,7 +1579,7 @@ fn build_key_symbols_section(
     for kind in &display_order {
         let kind_str = kind.to_string();
         if let Some(entries) = by_kind.get_mut(&kind_str) {
-            entries.sort_by(|a, b| b.2.cmp(&a.2));
+            entries.sort_by_key(|a| std::cmp::Reverse(a.2));
             let count = entries.len();
             content.push_str(&format!(
                 "<details><summary><strong>{}</strong> ({})</summary>\n<ul>\n",
@@ -1598,7 +1598,7 @@ fn build_key_symbols_section(
         if display_order.contains(&kind.as_str()) {
             continue;
         }
-        entries.sort_by(|a, b| b.2.cmp(&a.2));
+        entries.sort_by_key(|a| std::cmp::Reverse(a.2));
         let count = entries.len();
         content.push_str(&format!(
             "<details><summary><strong>{}</strong> ({})</summary>\n<ul>\n",
@@ -1622,11 +1622,10 @@ fn build_metrics_section(module: &ModuleDefinition, conn: &Connection) -> Result
     let pattern = format!("{}/%", module.path);
 
     // Average lines per file
-    let avg_lines = if module.file_count > 0 {
-        module.total_lines / module.file_count
-    } else {
-        0
-    };
+    let avg_lines = module
+        .total_lines
+        .checked_div(module.file_count)
+        .unwrap_or(0);
 
     // Outgoing dependency count
     let outgoing: usize = conn

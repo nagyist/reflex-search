@@ -163,7 +163,7 @@ fn extract_variables(
         let mut var_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             if capture_name == "name" {
                 name = Some(
                     capture
@@ -234,7 +234,7 @@ fn extract_symbols(
         let mut full_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             if capture_name == "name" {
                 name = Some(
                     capture
@@ -286,7 +286,7 @@ fn extract_preview(source: &str, span: &Span) -> String {
     let lines: Vec<&str> = source.lines().collect();
 
     // Extract 7 lines: the start line and 6 following lines
-    let start_idx = (span.start_line - 1) as usize; // Convert back to 0-indexed
+    let start_idx = span.start_line - 1; // Convert back to 0-indexed
     let end_idx = (start_idx + 7).min(lines.len());
 
     lines[start_idx..end_idx].join("\n")
@@ -359,7 +359,7 @@ typedef int UserID;
             .filter(|s| matches!(s.kind, SymbolKind::Type))
             .collect();
 
-        assert!(typedef_symbols.len() >= 1);
+        assert!(!typedef_symbols.is_empty());
         assert!(
             typedef_symbols
                 .iter()
@@ -499,7 +499,7 @@ typedef struct Node {
         let symbols = parse("test.c", source).unwrap();
 
         // Should find both the struct and the typedef
-        assert!(symbols.len() >= 1);
+        assert!(!symbols.is_empty());
         assert!(symbols.iter().any(|s| s.symbol.as_deref() == Some("Node")));
     }
 
@@ -633,7 +633,7 @@ fn extract_c_includes(source: &str, root: &tree_sitter::Node) -> Result<Vec<Impo
         let mut include_node = None;
 
         for capture in match_.captures {
-            let capture_name: &str = &query.capture_names()[capture.index as usize];
+            let capture_name: &str = query.capture_names()[capture.index as usize];
             match capture_name {
                 "include_path" => {
                     // Remove quotes or angle brackets from path

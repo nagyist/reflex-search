@@ -42,7 +42,6 @@ pub type ProgressCallback = Arc<dyn Fn(usize, usize, String) + Send + Sync>;
 
 /// Result of processing a single file (used for parallel processing)
 struct FileProcessingResult {
-    path: PathBuf,
     path_str: String,
     hash: String,
     content: String,
@@ -610,7 +609,6 @@ impl Indexer {
                 counter_clone.fetch_add(1, Ordering::Relaxed);
 
                 Some(FileProcessingResult {
-                    path: file_path.clone(),
                     path_str: normalized_path.to_string(),
                     hash,
                     content,
@@ -625,14 +623,19 @@ impl Indexer {
 
             // Process batch results immediately (streaming approach to minimize memory)
             for result in results.into_iter().flatten() {
+                // Use the normalized (forward-slash, relative) path everywhere so
+                // the trigram index and content store agree with what the database
+                // and downstream filters expect, regardless of host separator.
+                let normalized_pathbuf = PathBuf::from(&result.path_str);
+
                 // Add file to trigram index (get file_id)
-                let file_id = trigram_index.add_file(result.path.clone());
+                let file_id = trigram_index.add_file(normalized_pathbuf.clone());
 
                 // Index file content directly (avoid accumulating all trigrams)
                 trigram_index.index_file(file_id, &result.content);
 
                 // Add to content store
-                content_writer.add_file(result.path.clone(), &result.content);
+                content_writer.add_file(normalized_pathbuf, &result.content);
 
                 files_indexed += 1;
 

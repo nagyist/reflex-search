@@ -2715,10 +2715,19 @@ pub fn generate_ai_instruction(
     }
 
     // Priority 3: Paginated results
+    //
+    // REF-191: for autonomous find-all tasks this instruction must NOT tell the
+    // agent to stop and ask the user — there is no user in an agent loop, and a
+    // partial answer to "find every occurrence" is wrong. Instruct decisive
+    // continuation: fetch the remaining page(s) via offset, or probe the total
+    // cheaply with mode="count" first.
     if has_more {
         return Some(format!(
-            "Showing {} of {} results. PAGINATED - there are more results available. Do not automatically fetch all results. Show current page, ask user if these results answer their question before fetching more with --offset parameter.",
-            result_count, total_count
+            "Showing {} of {} results — {} more available. This is a partial answer. To finish a find-all task, call again with offset={} (raise limit up to 500 to get the rest in one call), or use mode=\"count\" first if you only need the total.",
+            result_count,
+            total_count,
+            total_count.saturating_sub(result_count),
+            result_count
         ));
     }
 

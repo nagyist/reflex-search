@@ -196,21 +196,33 @@ fn structured_content_matches_declared_output_schemas() {
     );
 
     // --- search_code, list mode: primary drift check ------------------------
+    // REF-209: list mode returns the columnar {columns, rows} shape by default.
     let sc = call_tool("search_code", json!({ "pattern": "struct" }));
     validate(&schemas["search_code"], &sc, "search_code")
         .expect("search_code structuredContent must match its outputSchema");
-    // The fixture defines two structs, so results must be non-empty — this
-    // exercises the nested results/matches/span schema, not just the envelope.
+    // The fixture defines two structs, so rows must be non-empty — this exercises
+    // the columnar columns/rows schema, not just the envelope.
     assert!(
         sc["total_count"].as_u64().unwrap_or(0) >= 1,
         "expected matches for 'struct' in fixture, got {sc}"
     );
+    let columns: Vec<&str> = sc["columns"]
+        .as_array()
+        .expect("columnar response must carry a columns array")
+        .iter()
+        .filter_map(|c| c.as_str())
+        .collect();
+    assert_eq!(
+        &columns[..5],
+        &["path", "language", "start_line", "end_line", "preview"],
+        "columnar header must begin with the five base columns, got {columns:?}"
+    );
     assert!(
-        sc["results"]
+        sc["rows"]
             .as_array()
             .map(|a| !a.is_empty())
             .unwrap_or(false),
-        "expected non-empty results array to exercise nested schema"
+        "expected non-empty rows array to exercise columnar schema, got {sc}"
     );
 
     // --- search_code, count mode: proves the oneOf count branch -------------
@@ -255,15 +267,12 @@ fn structured_content_matches_declared_output_schemas() {
 /// positive check above could be meaningless (a validator that accepts anything).
 #[test]
 fn validator_rejects_drift() {
-    // A well-formed list-mode envelope.
+    // A well-formed columnar list-mode envelope (REF-209).
     let good = json!({
         "status": "fresh",
         "pagination": { "total": 1, "count": 1, "offset": 0, "limit": 200, "has_more": false },
-        "results": [{
-            "path": "a.rs",
-            "language": "rust",
-            "matches": [{ "span": { "start_line": 1, "end_line": 1 }, "preview": "struct X" }]
-        }],
+        "columns": ["path", "language", "start_line", "end_line", "preview"],
+        "rows": [["a.rs", "rust", 1, 1, "struct X"]],
         "total_count": 1,
         "returned_count": 1,
         "has_more": false
@@ -285,16 +294,16 @@ fn validator_rejects_drift() {
     validate(&schema, &good, "good").expect("well-formed envelope must validate");
 
     // Drift 1: drop a required top-level field -> both oneOf branches fail.
-    let mut missing_results = good.clone();
-    missing_results.as_object_mut().unwrap().remove("results");
+    let mut missing_rows = good.clone();
+    missing_rows.as_object_mut().unwrap().remove("rows");
     assert!(
-        validate(&schema, &missing_results, "missing_results").is_err(),
-        "removing required 'results' must fail validation"
+        validate(&schema, &missing_rows, "missing_rows").is_err(),
+        "removing required 'rows' must fail validation"
     );
 
-    // Drift 2: wrong type for a nested field (span.start_line as a string).
+    // Drift 2: wrong type for a nested field (pagination.total as a string).
     let mut wrong_type = good.clone();
-    wrong_type["results"][0]["matches"][0]["span"]["start_line"] = json!("oops");
+    wrong_type["pagination"]["total"] = json!("oops");
     assert!(
         validate(&schema, &wrong_type, "wrong_type").is_err(),
         "wrong nested type must fail validation"
@@ -307,4 +316,33 @@ fn validator_rejects_drift() {
         validate(&schema, &bad_enum, "bad_enum").is_err(),
         "invalid status enum must fail validation"
     );
+}
+
+/// REF-210 regression: every declared `outputSchema` MUST have a root
+/// `"type": "object"`.
+///
+/// The MCP spec requires `outputSchema` to describe the `structuredContent`
+/// object, and Claude Code's client validates `outputSchema.type === "object"`
+/// on the *entire* `tools/list` batch. A single tool whose root schema is a bare
+/// `oneOf` (no `type`) makes the client reject the whole response, dropping every
+/// Reflex tool while the server still reports `status: connected` — the 0-tools
+/// failure that invalidated the REF-196 B_sc2 efficacy trials. This guards the
+/// `oneOf`-rooted schemas (`search_code`, `search_regex`, `find_references`) that
+/// caused it, plus any future tool.
+#[test]
+fn every_output_schema_root_is_object_typed() {
+    let schemas = output_schemas();
+    assert!(
+        !schemas.is_empty(),
+        "expected at least one tool to declare an outputSchema"
+    );
+    for (name, schema) in &schemas {
+        assert_eq!(
+            schema.get("type").and_then(|t| t.as_str()),
+            Some("object"),
+            "tool '{name}' outputSchema root must be `type: \"object\"` \
+             (Claude Code rejects the entire tools/list batch otherwise — REF-210); \
+             got root schema: {schema}"
+        );
+    }
 }

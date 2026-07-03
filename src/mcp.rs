@@ -248,12 +248,64 @@ fn schema_search_list() -> Value {
     })
 }
 
+/// Columnar list-mode result for `search_code` / `search_regex` (REF-209).
+///
+/// The file-grouped `results` array is replaced by a `{ columns, rows }` pair:
+/// each match becomes a positional row aligned to `columns`, so match-field keys
+/// appear once instead of once per match (~41% payload reduction on large
+/// results — see REF-196 analysis). Top-level metadata (`status`, `pagination`,
+/// the flattened `has_more`/`total_count`/`returned_count` scalars) is unchanged.
+fn schema_search_columnar() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "status": { "type": "string", "enum": ["fresh", "stale"] },
+            "can_trust_results": { "type": "boolean" },
+            "warning": { "type": "object" },
+            "ai_instruction": { "type": "string" },
+            "pagination": schema_pagination(),
+            "columns": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Column names for each row. Always begins with path, language, start_line, end_line, preview; kind/symbol/context_before/context_after/dependencies are appended only when at least one match carries them."
+            },
+            "rows": {
+                "type": "array",
+                "items": { "type": "array" },
+                "description": "One array per match; element i corresponds to columns[i]. path/language repeat per row so each row is self-contained."
+            },
+            "total_count": { "type": "integer" },
+            "returned_count": { "type": "integer" },
+            "has_more": { "type": "boolean" }
+        },
+        "required": ["status", "pagination", "columns", "rows", "total_count", "returned_count", "has_more"]
+    })
+}
+
 /// `outputSchema` for `search_code` and `search_regex`. `list` mode returns the
 /// full result set; `count` mode returns `{ count, pattern }`.
+///
+/// The list-mode branch tracks the runtime `REFLEX_MCP_COLUMNAR` toggle (REF-209)
+/// so the declared schema always matches what the server actually emits: the
+/// columnar `{ columns, rows }` shape by default, or the legacy file-grouped
+/// `results` array when columnar output is disabled.
 fn schema_search_output() -> Value {
+    let list = if columnar_enabled() {
+        schema_search_columnar()
+    } else {
+        schema_search_list()
+    };
     json!({
-        "description": "list mode (default) returns full results; count mode returns {count, pattern}",
-        "oneOf": [schema_search_list(), schema_count_result()]
+        // MCP requires `outputSchema` to be an object-type JSON Schema (the
+        // `structuredContent` payload is always a JSON object). Both `oneOf`
+        // branches are themselves `type: object`, so declaring the root as
+        // `object` is consistent and is REQUIRED: Claude Code's client validates
+        // `outputSchema.type === "object"` and rejects the *entire* tools/list
+        // batch (dropping all tools, server still "connected") if any tool's
+        // root schema is a bare `oneOf` without it (REF-210).
+        "type": "object",
+        "description": "list mode (default) returns full results in columnar {columns, rows} form (REF-209); count mode returns {count, pattern}. Set REFLEX_MCP_COLUMNAR=0 to restore the legacy results[] shape.",
+        "oneOf": [list, schema_count_result()]
     })
 }
 
@@ -296,6 +348,10 @@ fn schema_find_references_output() -> Value {
         "required": ["status", "definition", "references", "total_references", "total_count", "returned_count", "has_more", "pagination"]
     });
     json!({
+        // Root must be `type: object` — see the note in `schema_search_output`.
+        // A bare top-level `oneOf` here fails Claude Code's outputSchema
+        // validation and silently drops every Reflex tool (REF-210).
+        "type": "object",
         "description": "list mode (default) returns definition + references; count mode returns {count, pattern}",
         "oneOf": [list, schema_count_result()]
     })
@@ -461,7 +517,7 @@ fn handle_list_tools(_params: Option<Value>, enable_structural: bool) -> Result<
             },
             {
                 "name": "search_code",
-                "description": "Comprehensive full-codebase search — equivalent to `grep -rn`. Returns ALL occurrences across every indexed file in a single call. Do NOT chain multiple search_code calls for the same pattern — one call is already exhaustive. Use mode=\"count\" to get just the match count before deciding whether to paginate.\n\n**Search modes:**\n- Full-text (default): Finds ALL occurrences — definitions + usages\n- Symbol-only (symbols=true): Finds ONLY definitions where symbols are declared\n\n**When to use search_regex instead:**\n- Patterns with special characters: -> :: () [] {} . * + ? \\\\ | ^ $\n- Complex pattern matching: wildcards, alternation, anchors\n- Examples: '->with(', '::new', 'function*', '[derive]', 'fn (get|set)_.*'\n\n**Use this for:**\n- Simple text patterns (alphanumeric, underscores, hyphens)\n- Detailed analysis with line numbers and code previews\n- Symbol definition searches\n\n**Count mode:** Pass mode=\"count\" to get {\"count\": N, \"pattern\": \"...\"} with no match bodies. Faster than list mode — use this to check cardinality before paginating.\n\n**Pagination:** Check response.pagination.has_more. If true, use offset parameter to fetch next page.\n\n**Error Handling:** If you receive an error message containing \"Index not found\" or \"stale\", immediately call the index_project tool, wait for it to complete, then retry this operation.",
+                "description": "Comprehensive full-codebase search — equivalent to `grep -rn`. Returns ALL occurrences across every indexed file in a single call. Do NOT chain multiple search_code calls for the same pattern — one call is already exhaustive. Use mode=\"count\" to get just the match count before deciding whether to paginate.\n\n**Search modes:**\n- Full-text (default): Finds ALL occurrences — definitions + usages\n- Symbol-only (symbols=true): Finds ONLY definitions where symbols are declared\n\n**When to use search_regex instead:**\n- Patterns with special characters: -> :: () [] {} . * + ? \\\\ | ^ $\n- Complex pattern matching: wildcards, alternation, anchors\n- Examples: '->with(', '::new', 'function*', '[derive]', 'fn (get|set)_.*'\n\n**Use this for:**\n- Simple text patterns (alphanumeric, underscores, hyphens)\n- Detailed analysis with line numbers and code previews\n- Symbol definition searches\n\n**Count mode:** Pass mode=\"count\" to get {\"count\": N, \"pattern\": \"...\"} with no match bodies. Faster than list mode — use this to check cardinality before paginating.\n\n**Result shape (list mode):** Results are columnar to save tokens: {\"columns\": [...], \"rows\": [[...]]}. Each row is one match with values positionally aligned to `columns` (always path, language, start_line, end_line, preview; then kind/symbol/context when present). Read `columns` to map positions. Set env REFLEX_MCP_COLUMNAR=0 to restore the legacy results[] object shape.\n\n**Pagination:** Check response.pagination.has_more. If true, use offset parameter to fetch next page.\n\n**Error Handling:** If you receive an error message containing \"Index not found\" or \"stale\", immediately call the index_project tool, wait for it to complete, then retry this operation.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -539,7 +595,7 @@ fn handle_list_tools(_params: Option<Value>, enable_structural: bool) -> Result<
             },
             {
                 "name": "search_regex",
-                "description": "Regex-based code search for complex pattern matching (e.g., 'fn (get|set)_\\\\w+').\n\n**Use for:**\n- Patterns with special characters: -> :: () [] {} . * + ? \\\\ | ^ $\n- Pattern matching: wildcards (.*), alternation (a|b), anchors (^$)\n- Complex searches: case-insensitive variants, word boundaries\n\n**Common examples:**\n- Method calls: '->with\\\\(', '->map\\\\(', '::new\\\\('\n- Operators: '->', '::', '||', '&&'\n- Functions: 'fn (get|set)_\\\\\\\\w+' (getter/setter functions)\n- Attributes: '\\\\\\\\[(derive|test)\\\\\\\\]' (Rust attributes)\n\n**Escaping rules:**\n- Must escape: ( ) [ ] { } . * + ? \\\\ | ^ $\n- No escaping needed: -> :: - _ / = < >\n- Use double backslash in JSON: \\\\\\\\( \\\\\\\\) \\\\\\\\[ \\\\\\\\]\n\n**Count mode:** Pass mode=\"count\" to get {\"count\": N, \"pattern\": \"...\"} with no match bodies — faster than list mode.\n\n**Error Handling:** If you receive an error message containing \"Index not found\" or \"stale\", immediately call the index_project tool, wait for it to complete, then retry this operation.\n\n**Don't use for:**\n- Simple text searches (use search_code instead - faster)\n- Symbol definitions (use search_code with symbols=true instead)",
+                "description": "Regex-based code search for complex pattern matching (e.g., 'fn (get|set)_\\\\w+').\n\n**Use for:**\n- Patterns with special characters: -> :: () [] {} . * + ? \\\\ | ^ $\n- Pattern matching: wildcards (.*), alternation (a|b), anchors (^$)\n- Complex searches: case-insensitive variants, word boundaries\n\n**Common examples:**\n- Method calls: '->with\\\\(', '->map\\\\(', '::new\\\\('\n- Operators: '->', '::', '||', '&&'\n- Functions: 'fn (get|set)_\\\\\\\\w+' (getter/setter functions)\n- Attributes: '\\\\\\\\[(derive|test)\\\\\\\\]' (Rust attributes)\n\n**Escaping rules:**\n- Must escape: ( ) [ ] { } . * + ? \\\\ | ^ $\n- No escaping needed: -> :: - _ / = < >\n- Use double backslash in JSON: \\\\\\\\( \\\\\\\\) \\\\\\\\[ \\\\\\\\]\n\n**Count mode:** Pass mode=\"count\" to get {\"count\": N, \"pattern\": \"...\"} with no match bodies — faster than list mode.\n\n**Result shape (list mode):** Results are columnar to save tokens: {\"columns\": [...], \"rows\": [[...]]}. Each row is one match with values positionally aligned to `columns` (always path, language, start_line, end_line, preview; then kind/symbol/context when present). Read `columns` to map positions. Set env REFLEX_MCP_COLUMNAR=0 to restore the legacy results[] object shape.\n\n**Error Handling:** If you receive an error message containing \"Index not found\" or \"stale\", immediately call the index_project tool, wait for it to complete, then retry this operation.\n\n**Don't use for:**\n- Simple text searches (use search_code instead - faster)\n- Symbol definitions (use search_code with symbols=true instead)",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -993,6 +1049,147 @@ fn sc_stage2_enabled() -> bool {
     }
 }
 
+/// REF-209: columnar result-format toggle for `search_code` / `search_regex`.
+///
+/// Default ON. Returns `false` only when `REFLEX_MCP_COLUMNAR` is explicitly set
+/// to a falsey value (`0`/`false`/`off`/`no`, case-insensitive), which restores
+/// the legacy file-grouped `results` array for backwards compatibility. Both the
+/// emitted payload (`to_columnar`) and the declared `outputSchema`
+/// (`schema_search_output`) consult this, so they never drift.
+fn columnar_enabled() -> bool {
+    match std::env::var("REFLEX_MCP_COLUMNAR") {
+        Ok(v) => !matches!(
+            v.trim().to_ascii_lowercase().as_str(),
+            "0" | "false" | "off" | "no"
+        ),
+        Err(_) => true,
+    }
+}
+
+/// REF-209: reshape a search response's file-grouped `results` array into a
+/// columnar `{ columns, rows }` pair to cut key-repetition token cost.
+///
+/// One row is emitted per match; `path`/`language` (and any file-level
+/// `dependencies`) repeat per row so each row is self-contained and needs no
+/// back-reference. Columns are emitted dynamically: the five always-present
+/// fields (`path`, `language`, `start_line`, `end_line`, `preview`) plus any
+/// optional field (`kind`, `symbol`, `context_before`, `context_after`,
+/// `dependencies`) that at least one match/file actually carries — so the common
+/// full-text case stays at five columns with no all-`null` padding.
+///
+/// Objects without a `results` array (count-mode `{count, pattern}`, error
+/// shapes) are returned unchanged, so this is safe to call on any success value.
+fn to_columnar(mut value: Value) -> Value {
+    // Only transform success objects that carry a `results` array.
+    if !value.get("results").map(Value::is_array).unwrap_or(false) {
+        return value;
+    }
+    let obj = value
+        .as_object_mut()
+        .expect("value has a `results` member, so it is an object");
+    let results = match obj.remove("results") {
+        Some(Value::Array(results)) => results,
+        // Unreachable given the guard above, but stay total rather than panic.
+        other => {
+            if let Some(other) = other {
+                obj.insert("results".to_string(), other);
+            }
+            return value;
+        }
+    };
+
+    // Pass 1: decide which optional columns any row needs.
+    let mut has_kind = false;
+    let mut has_symbol = false;
+    let mut has_ctx_before = false;
+    let mut has_ctx_after = false;
+    let mut has_deps = false;
+    for file in &results {
+        if file.get("dependencies").is_some() {
+            has_deps = true;
+        }
+        if let Some(matches) = file.get("matches").and_then(Value::as_array) {
+            for m in matches {
+                has_kind |= m.get("kind").is_some();
+                has_symbol |= m.get("symbol").is_some();
+                has_ctx_before |= m.get("context_before").is_some();
+                has_ctx_after |= m.get("context_after").is_some();
+            }
+        }
+    }
+
+    // Fixed base columns; optional ones appended only when present, in a stable
+    // order so `columns[i]` is deterministic for a given result set.
+    let mut columns: Vec<&'static str> =
+        vec!["path", "language", "start_line", "end_line", "preview"];
+    if has_kind {
+        columns.push("kind");
+    }
+    if has_symbol {
+        columns.push("symbol");
+    }
+    if has_ctx_before {
+        columns.push("context_before");
+    }
+    if has_ctx_after {
+        columns.push("context_after");
+    }
+    if has_deps {
+        columns.push("dependencies");
+    }
+
+    // Pass 2: project each match into a positional row aligned to `columns`.
+    let mut rows: Vec<Value> = Vec::new();
+    for file in &results {
+        let path = file.get("path").cloned().unwrap_or(Value::Null);
+        let language = file.get("language").cloned().unwrap_or(Value::Null);
+        let deps = file.get("dependencies").cloned().unwrap_or(Value::Null);
+        let Some(matches) = file.get("matches").and_then(Value::as_array) else {
+            continue;
+        };
+        for m in matches {
+            let span = m.get("span");
+            let start_line = span
+                .and_then(|s| s.get("start_line"))
+                .cloned()
+                .unwrap_or(Value::Null);
+            let end_line = span
+                .and_then(|s| s.get("end_line"))
+                .cloned()
+                .unwrap_or(Value::Null);
+            let preview = m.get("preview").cloned().unwrap_or(Value::Null);
+
+            let mut row: Vec<Value> = vec![
+                path.clone(),
+                language.clone(),
+                start_line,
+                end_line,
+                preview,
+            ];
+            if has_kind {
+                row.push(m.get("kind").cloned().unwrap_or(Value::Null));
+            }
+            if has_symbol {
+                row.push(m.get("symbol").cloned().unwrap_or(Value::Null));
+            }
+            if has_ctx_before {
+                row.push(m.get("context_before").cloned().unwrap_or(Value::Null));
+            }
+            if has_ctx_after {
+                row.push(m.get("context_after").cloned().unwrap_or(Value::Null));
+            }
+            if has_deps {
+                row.push(deps.clone());
+            }
+            rows.push(Value::Array(row));
+        }
+    }
+
+    obj.insert("columns".to_string(), json!(columns));
+    obj.insert("rows".to_string(), Value::Array(rows));
+    value
+}
+
 /// Generate a brief human-readable summary of a tool result for Stage 2
 /// `content[text]`. Inspects common result shape fields to produce a concise
 /// description. Falls back to a generic message for unrecognised shapes.
@@ -1427,6 +1624,12 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 map.insert("returned_count".to_string(), json!(result_count));
             }
 
+            // REF-209: emit the token-efficient columnar shape by default; the
+            // env toggle restores the legacy results[] array for compatibility.
+            if columnar_enabled() {
+                response_val = to_columnar(response_val);
+            }
+
             Ok(make_tool_result(response_val))
         }
         "search_regex" => {
@@ -1562,6 +1765,12 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 map.insert("has_more".to_string(), json!(has_more));
                 map.insert("total_count".to_string(), json!(total_count));
                 map.insert("returned_count".to_string(), json!(result_count));
+            }
+
+            // REF-209: emit the token-efficient columnar shape by default; the
+            // env toggle restores the legacy results[] array for compatibility.
+            if columnar_enabled() {
+                response_val = to_columnar(response_val);
             }
 
             Ok(make_tool_result(response_val))
@@ -2682,6 +2891,186 @@ mod tests {
         // NOTE: relies on REFLEX_MCP_STRUCTURED_CONTENT being unset in the test
         // environment (the harness never sets it); asserts the default only.
         assert!(super::structured_content_enabled());
+    }
+
+    // REF-209: columnar output is the shipped default unless a caller opts out.
+    #[test]
+    fn test_columnar_enabled_default_on() {
+        // Relies on REFLEX_MCP_COLUMNAR being unset in the harness environment.
+        assert!(super::columnar_enabled());
+    }
+
+    /// A representative two-file list-mode search response (post-flattening),
+    /// mixing a symbol match and a plain-text match.
+    fn sample_search_response() -> serde_json::Value {
+        json!({
+            "status": "fresh",
+            "pagination": {"total": 2, "count": 2, "offset": 0, "limit": 200, "has_more": false},
+            "results": [
+                {
+                    "path": "src/mcp.rs",
+                    "language": "rust",
+                    "matches": [
+                        {"kind": "Function", "symbol": "make_tool_result",
+                         "span": {"start_line": 955, "end_line": 957}, "preview": "fn make_tool_result"}
+                    ]
+                },
+                {
+                    "path": "src/query.rs",
+                    "language": "rust",
+                    "matches": [
+                        {"span": {"start_line": 10, "end_line": 10}, "preview": "let x = 1;"},
+                        {"span": {"start_line": 20, "end_line": 20}, "preview": "let y = 2;"}
+                    ]
+                }
+            ],
+            "total_count": 2,
+            "returned_count": 2,
+            "has_more": false
+        })
+    }
+
+    // REF-209: `results` array is replaced by columns/rows; one row per match.
+    #[test]
+    fn test_to_columnar_reshapes_results() {
+        let out = super::to_columnar(sample_search_response());
+
+        // `results` is gone, replaced by `columns` + `rows`.
+        assert!(out.get("results").is_none(), "results must be removed");
+        let columns = out["columns"].as_array().expect("columns array");
+        let rows = out["rows"].as_array().expect("rows array");
+
+        // The five base columns always lead; kind/symbol appended because one
+        // match carries them. No context columns (none present).
+        let col_names: Vec<&str> = columns.iter().filter_map(|c| c.as_str()).collect();
+        assert_eq!(
+            col_names,
+            vec![
+                "path",
+                "language",
+                "start_line",
+                "end_line",
+                "preview",
+                "kind",
+                "symbol"
+            ]
+        );
+
+        // One row per match across all files (1 + 2 = 3).
+        assert_eq!(rows.len(), 3);
+
+        // Symbol row is fully populated and positionally aligned to columns.
+        assert_eq!(
+            rows[0],
+            json!([
+                "src/mcp.rs",
+                "rust",
+                955,
+                957,
+                "fn make_tool_result",
+                "Function",
+                "make_tool_result"
+            ])
+        );
+        // Plain-text rows carry null in the trailing optional columns.
+        assert_eq!(
+            rows[1],
+            json!(["src/query.rs", "rust", 10, 10, "let x = 1;", null, null])
+        );
+        assert_eq!(
+            rows[2],
+            json!(["src/query.rs", "rust", 20, 20, "let y = 2;", null, null])
+        );
+    }
+
+    // REF-209: top-level metadata (status/pagination/scalars) survives the reshape.
+    #[test]
+    fn test_to_columnar_preserves_metadata() {
+        let out = super::to_columnar(sample_search_response());
+        assert_eq!(out["status"], "fresh");
+        assert_eq!(out["total_count"], 2);
+        assert_eq!(out["returned_count"], 2);
+        assert_eq!(out["has_more"], false);
+        assert_eq!(out["pagination"]["total"], 2);
+        assert_eq!(out["pagination"]["limit"], 200);
+    }
+
+    // REF-209: a pure full-text result (no kind/symbol/context) stays at the five
+    // base columns — no all-null padding claws back the token saving.
+    #[test]
+    fn test_to_columnar_omits_absent_optional_columns() {
+        let data = json!({
+            "status": "fresh",
+            "pagination": {"total": 1, "count": 1, "offset": 0, "limit": 200, "has_more": false},
+            "results": [{
+                "path": "a.rs", "language": "rust",
+                "matches": [{"span": {"start_line": 1, "end_line": 1}, "preview": "struct X"}]
+            }],
+            "total_count": 1, "returned_count": 1, "has_more": false
+        });
+        let out = super::to_columnar(data);
+        let col_names: Vec<&str> = out["columns"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|c| c.as_str())
+            .collect();
+        assert_eq!(
+            col_names,
+            vec!["path", "language", "start_line", "end_line", "preview"]
+        );
+        assert_eq!(out["rows"][0], json!(["a.rs", "rust", 1, 1, "struct X"]));
+    }
+
+    // REF-209: context columns appear only when a match carries context lines.
+    #[test]
+    fn test_to_columnar_includes_context_columns_when_present() {
+        let data = json!({
+            "status": "fresh",
+            "pagination": {"total": 1, "count": 1, "offset": 0, "limit": 200, "has_more": false},
+            "results": [{
+                "path": "a.rs", "language": "rust",
+                "matches": [{
+                    "span": {"start_line": 5, "end_line": 5}, "preview": "hit",
+                    "context_before": ["above"], "context_after": ["below"]
+                }]
+            }],
+            "total_count": 1, "returned_count": 1, "has_more": false
+        });
+        let out = super::to_columnar(data);
+        let col_names: Vec<&str> = out["columns"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|c| c.as_str())
+            .collect();
+        assert_eq!(
+            col_names,
+            vec![
+                "path",
+                "language",
+                "start_line",
+                "end_line",
+                "preview",
+                "context_before",
+                "context_after"
+            ]
+        );
+        assert_eq!(
+            out["rows"][0],
+            json!(["a.rs", "rust", 5, 5, "hit", ["above"], ["below"]])
+        );
+    }
+
+    // REF-209: count-mode / non-results shapes pass through untouched, so
+    // `to_columnar` is safe to call on any success value.
+    #[test]
+    fn test_to_columnar_passthrough_non_results() {
+        let count = json!({"count": 7, "pattern": "foo"});
+        assert_eq!(super::to_columnar(count.clone()), count);
+
+        let scalar = json!("not an object");
+        assert_eq!(super::to_columnar(scalar.clone()), scalar);
     }
 
     // REF-200: tool schemas must advertise the correct default limit (200, raised from 50 in REF-191) and max cap (500)

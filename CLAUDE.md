@@ -124,6 +124,28 @@ All tool schemas are pre-loaded — **do NOT call ToolSearch** to discover them.
 
 See [`docs/mcp-tool-cheatsheet.md`](./docs/mcp-tool-cheatsheet.md) for a decision tree by agent intent.
 
+**Columnar result format (`search_code` / `search_regex`, list mode):** To cut token
+cost from repeated JSON keys (~41% on large results), these two tools return matches
+in a columnar shape instead of an array of per-file objects:
+
+```json
+{
+  "columns": ["path", "language", "start_line", "end_line", "preview", "kind", "symbol"],
+  "rows": [
+    ["src/mcp.rs", "rust", 955, 957, "fn make_tool_result", "Function", "make_tool_result"]
+  ],
+  "pagination": { "total": 1, "has_more": false },
+  "status": "fresh", "total_count": 1, "returned_count": 1, "has_more": false
+}
+```
+
+Each `rows[i]` is one match; element `j` corresponds to `columns[j]`. The five base
+columns (`path`, `language`, `start_line`, `end_line`, `preview`) are always present;
+`kind`/`symbol`/`context_before`/`context_after`/`dependencies` are appended only when
+a match carries them. Top-level metadata (`status`, `pagination`, `total_count`, …) is
+unchanged. Set env `REFLEX_MCP_COLUMNAR=0` to restore the legacy `results[]` object
+shape. `count` mode (`{count, pattern}`) and the other tools are unaffected.
+
 ---
 
 ## AST Pattern Matching

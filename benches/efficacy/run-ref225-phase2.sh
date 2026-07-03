@@ -120,6 +120,31 @@ if [ -z "$DRY_RUN" ]; then
     2>&1 | tee -a "$LOG_FILE"
 
   echo "" | tee -a "$LOG_FILE"
+  echo "=== Recall guardrail: file-coverage recall per arm (rubric tasks) ===" | tee -a "$LOG_FILE"
+  python3 benches/efficacy/score_recall_ref225.py \
+    --tasks benches/efficacy/tasks/iteration-forcing.yaml \
+    --results-dir benches/efficacy/results/ \
+    --out benches/efficacy/results/recall_ref225.csv \
+    2>&1 | tee -a "$LOG_FILE"
+  # Guardrail check: arm B median recall must not be materially below arm A
+  python3 - <<'RECALLEOF' 2>&1 | tee -a "$LOG_FILE"
+import csv, statistics
+from pathlib import Path
+p = Path("benches/efficacy/results/recall_ref225.csv")
+if p.exists():
+    rows = list(csv.DictReader(open(p)))
+    a = [float(r["recall"]) for r in rows if r["arm"] == "A"]
+    b = [float(r["recall"]) for r in rows if r["arm"] == "B"]
+    if a and b:
+        ma, mb = statistics.median(a), statistics.median(b)
+        delta = mb - ma
+        # Guardrail: fail if B recall drops more than 0.05 (5pp) below A
+        status = "PASS" if delta >= -0.05 else "FAIL — arm B sacrifices coverage"
+        print(f"RECALL GUARDRAIL: arm A median={ma:.3f}, arm B median={mb:.3f}, "
+              f"delta={delta:+.3f} -> {status}")
+RECALLEOF
+
+  echo "" | tee -a "$LOG_FILE"
   echo "=== Phase 2 statistical analysis (Wilcoxon signed-rank + Holm-Bonferroni) ===" | tee -a "$LOG_FILE"
   python3 - <<'PYEOF' 2>&1 | tee -a "$LOG_FILE"
 import csv, sys

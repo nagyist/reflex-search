@@ -132,7 +132,8 @@ fn handle_initialize(_params: Option<Value>) -> Result<Value> {
         "serverInfo": {
             "name": "reflex",
             "version": env!("CARGO_PKG_VERSION")
-        }
+        },
+        "instructions": "If mcp__reflex__* tools appear in your available tool list, prefer them over Grep and Glob for code search tasks. Their schemas are pre-loaded — do NOT call ToolSearch before using them. If you see 'Index not found', call mcp__reflex__index_project first, then retry."
     }))
 }
 
@@ -2284,6 +2285,32 @@ mod tests {
             raw.trim().is_empty(),
             "notification must not get a response"
         );
+    }
+
+    // REF-197: initialize handshake must carry the MCP `instructions` field that
+    // nudges clients to prefer reflex tools (moved out of the per-repo CLAUDE.md).
+    #[test]
+    fn test_initialize_includes_instructions() {
+        let req = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}"#;
+        let raw = call_server(&format!("{}\n", req));
+        let resp = parse_first_response(&raw);
+
+        let instructions = resp["result"]["instructions"]
+            .as_str()
+            .expect("instructions must be a string");
+        assert!(!instructions.is_empty(), "instructions must be non-empty");
+        assert!(
+            instructions.contains("mcp__reflex__"),
+            "instructions must reference the mcp__reflex__ tool prefix"
+        );
+        assert!(
+            instructions.contains("index_project"),
+            "instructions must mention the index_project recovery step"
+        );
+
+        // Pre-existing handshake fields must be unchanged.
+        assert_eq!(resp["result"]["protocolVersion"], "2024-11-05");
+        assert_eq!(resp["result"]["serverInfo"]["name"], "reflex");
     }
 
     // REF-185: tool schemas must advertise the new default limits (50) and max cap (500)

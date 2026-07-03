@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import json
 import statistics
+import sys
 from pathlib import Path
 
 IF_TASK_IDS = [
@@ -113,6 +114,9 @@ def main() -> None:
           f"(median num_turns >= {GATE_THRESHOLD})")
     if marginal:
         print(f"  MARGINAL tasks (median exactly {GATE_THRESHOLD}): {', '.join(marginal)}")
+    # A task with too few completed trials is not yet decidable; the gate is only
+    # final when every task has at least --min-trials completed trials.
+    undecided = [t for t in IF_TASK_IDS if t in incomplete_tasks]
     if n_pass >= MIN_TASKS_PASS:
         print(f"  -> PHASE 1 PASSES ({n_pass} >= {MIN_TASKS_PASS}): proceed to Phase 2 "
               f"(launch run-ref225-phase2.sh)")
@@ -120,6 +124,12 @@ def main() -> None:
         print(f"  -> PHASE 1 FAILS ({n_pass} < {MIN_TASKS_PASS}): publish the null result.")
         print("     Null: 'Could not construct >= 12 iteration-forcing tasks that arm-A")
         print("     cannot answer in <= 3 turns; REF-222 parity is robust.'")
+
+    # Exit codes for orchestration: 0 = gate PASS, 1 = gate FAIL,
+    # 2 = not yet decidable (tasks still missing data).
+    if undecided:
+        sys.exit(2)
+    sys.exit(0 if n_pass >= MIN_TASKS_PASS else 1)
 
 
 if __name__ == "__main__":

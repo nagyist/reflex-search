@@ -136,6 +136,36 @@ ARMS = {
             "systematic preference to any particular category of tool."
         ),
     },
+    # -----------------------------------------------------------------------
+    # REF-204: structuredContent A/B pair (REF-196 Phase 4).
+    #
+    # B_sc and B_nosc are byte-for-byte identical arm-B configs (same Reflex MCP,
+    # same instructions-field nudge, same allowed tools, same model, same tasks).
+    # The ONLY difference is whether the rfx MCP server emits the additive
+    # `structuredContent` field (REF-202). Because REF-202's structuredContent is
+    # purely additive, disabling it via env reproduces the exact pre-REF-202
+    # `content[text]`-only tool-result shape — so B_sc / B_nosc isolates the token
+    # cost of `structuredContent` alone (the REF-204 "B_sc / B" ratio, where
+    # B_nosc IS "plain Reflex MCP"). Both use the current release binary.
+    # -----------------------------------------------------------------------
+    "B_sc": {
+        "description": "structuredContent ON: Reflex MCP + nudge, tool results carry native structuredContent (REF-202 default)",
+        "mcp_command": "TARGET_RELEASE_RFX",
+        "extra_flags": ["--strict-mcp-config", "--dangerously-skip-permissions"],
+        "disallowed_tools": [],
+        "allowed_tools": BUILTIN_TOOLS_MCP_ARMS + REFLEX_MCP_TOOLS,
+        "append_system_prompt": None,
+        "mcp_env": None,  # default => structuredContent emitted
+    },
+    "B_nosc": {
+        "description": "structuredContent OFF: plain Reflex MCP + nudge (pre-REF-202 content[text]-only shape); baseline for B_sc/B ratio",
+        "mcp_command": "TARGET_RELEASE_RFX",
+        "extra_flags": ["--strict-mcp-config", "--dangerously-skip-permissions"],
+        "disallowed_tools": [],
+        "allowed_tools": BUILTIN_TOOLS_MCP_ARMS + REFLEX_MCP_TOOLS,
+        "append_system_prompt": None,
+        "mcp_env": {"REFLEX_MCP_STRUCTURED_CONTENT": "0"},
+    },
 }
 
 
@@ -264,20 +294,30 @@ def get_repo_sha() -> str:
     return result.stdout.strip() if result.returncode == 0 else "unknown"
 
 
-def make_mcp_config(rfx_binary: Path | None, tmp_dir: Path, arm_name: str) -> Path:
-    """Write a temporary MCP config JSON and return its path."""
+def make_mcp_config(
+    rfx_binary: Path | None,
+    tmp_dir: Path,
+    arm_name: str,
+    mcp_env: dict[str, str] | None = None,
+) -> Path:
+    """Write a temporary MCP config JSON and return its path.
+
+    ``mcp_env`` (when set) is injected as the Reflex MCP server's ``env`` block so
+    per-arm environment toggles reach the ``rfx mcp`` subprocess. REF-204 uses
+    this to run arm B_nosc with ``REFLEX_MCP_STRUCTURED_CONTENT=0`` (structuredContent
+    suppressed) against B_sc (default) from a single build.
+    """
     config_path = tmp_dir / f"mcp-{arm_name}.json"
     if rfx_binary is None:
         config = {"mcpServers": {}}
     else:
-        config = {
-            "mcpServers": {
-                "reflex": {
-                    "command": str(rfx_binary),
-                    "args": ["mcp"],
-                }
-            }
+        server: dict = {
+            "command": str(rfx_binary),
+            "args": ["mcp"],
         }
+        if mcp_env:
+            server["env"] = dict(mcp_env)
+        config = {"mcpServers": {"reflex": server}}
     config_path.write_text(json.dumps(config))
     return config_path
 
@@ -563,7 +603,9 @@ def main() -> None:
         for arm_name in args.arms:
             arm_cfg = ARMS[arm_name]
             rfx_bin = rfx_binary if arm_cfg["mcp_command"] == "TARGET_RELEASE_RFX" else None
-            mcp_cfg_path = make_mcp_config(rfx_bin, tmp, arm_name)
+            mcp_cfg_path = make_mcp_config(
+                rfx_bin, tmp, arm_name, mcp_env=arm_cfg.get("mcp_env")
+            )
 
             print(f"=== ARM {arm_name}: {arm_cfg['description']} ===")
 

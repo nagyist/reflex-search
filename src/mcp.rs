@@ -734,13 +734,41 @@ fn handle_list_tools(_params: Option<Value>, enable_structural: bool) -> Result<
 /// results are surfaced through the JSON-RPC error channel in `process_request`,
 /// never as a tool result, so there are no `isError` responses to preserve here.
 fn make_tool_result(data: Value) -> Value {
-    json!({
-        "content": [{
-            "type": "text",
-            "text": serde_json::to_string(&data).unwrap_or_default()
-        }],
-        "structuredContent": data
-    })
+    make_tool_result_with(data, structured_content_enabled())
+}
+
+/// REF-204: A/B efficacy switch for the additive `structuredContent` field.
+///
+/// Returns `false` only when `REFLEX_MCP_STRUCTURED_CONTENT` is explicitly set to
+/// a falsey value (`0`/`false`/`off`/`no`, case-insensitive); otherwise the field
+/// is emitted (the shipped REF-202 default). Disabling it reproduces the
+/// pre-REF-202 `content[text]`-only tool-result shape from the *same* binary, so
+/// the B_sc-vs-B efficacy comparison isolates exactly one variable — the presence
+/// of `structuredContent` — while `content[text]` stays byte-identical.
+fn structured_content_enabled() -> bool {
+    match std::env::var("REFLEX_MCP_STRUCTURED_CONTENT") {
+        Ok(v) => !matches!(
+            v.trim().to_ascii_lowercase().as_str(),
+            "0" | "false" | "off" | "no"
+        ),
+        Err(_) => true,
+    }
+}
+
+/// Inner builder split out from [`make_tool_result`] so both output shapes are
+/// unit-testable without mutating process-global env (which would race cargo's
+/// parallel test threads). `structured = true` adds the `structuredContent`
+/// object; `false` emits only the legacy `content[text]` JSON string.
+fn make_tool_result_with(data: Value, structured: bool) -> Value {
+    let content = json!([{
+        "type": "text",
+        "text": serde_json::to_string(&data).unwrap_or_default()
+    }]);
+    if structured {
+        json!({ "content": content, "structuredContent": data })
+    } else {
+        json!({ "content": content })
+    }
 }
 
 fn handle_call_tool(params: Option<Value>) -> Result<Value> {
@@ -1797,13 +1825,18 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
             // and change content[text]; instead keep content[text] as the raw
             // string and expose the same prose under structuredContent (REF-202).
             let context_text = format!("{}{}", context, hint);
-            Ok(json!({
+            let mut result = json!({
                 "content": [{
                     "type": "text",
                     "text": context_text.clone()
-                }],
-                "structuredContent": { "context": context_text }
-            }))
+                }]
+            });
+            // REF-204: gate the additive structuredContent for A/B measurement,
+            // keeping content[text] byte-identical (see structured_content_enabled).
+            if structured_content_enabled() {
+                result["structuredContent"] = json!({ "context": context_text });
+            }
+            Ok(result)
         }
         "check_index_status" => {
             let cache = CacheManager::new(".");
@@ -2266,6 +2299,36 @@ mod tests {
         let roundtrip: serde_json::Value =
             serde_json::from_str(text).expect("content[text] must be valid JSON");
         assert_eq!(roundtrip, data);
+    }
+
+    // REF-204: the structuredContent field is a runtime A/B toggle. With it
+    // disabled, content[text] must be byte-identical to the enabled shape and
+    // structuredContent must be absent (reproducing pre-REF-202 output). Tested
+    // via the inner builder so no process-global env is mutated (race-free under
+    // cargo's parallel test threads).
+    #[test]
+    fn test_make_tool_result_toggle_off_omits_structured_content() {
+        let data = json!({"status": "fresh", "count": 3});
+        let on = super::make_tool_result_with(data.clone(), true);
+        let off = super::make_tool_result_with(data.clone(), false);
+
+        // Enabled shape matches the shipped REF-202 default.
+        assert_eq!(on["structuredContent"], data);
+
+        // Disabled shape drops structuredContent entirely...
+        assert!(off.get("structuredContent").is_none());
+        // ...but leaves content[text] byte-identical, so the only measured
+        // difference between the B and B_sc arms is the extra field.
+        assert_eq!(off["content"], on["content"]);
+    }
+
+    // REF-204: default (env unset) must keep structuredContent enabled so the
+    // shipped contract is unchanged unless a caller explicitly opts out.
+    #[test]
+    fn test_structured_content_enabled_default_on() {
+        // NOTE: relies on REFLEX_MCP_STRUCTURED_CONTENT being unset in the test
+        // environment (the harness never sets it); asserts the default only.
+        assert!(super::structured_content_enabled());
     }
 
     // REF-200: tool schemas must advertise the correct default limit (200, raised from 50 in REF-191) and max cap (500)

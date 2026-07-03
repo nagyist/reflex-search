@@ -137,6 +137,219 @@ fn handle_initialize(_params: Option<Value>) -> Result<Value> {
     }))
 }
 
+// ---------------------------------------------------------------------------
+// outputSchema builders (REF-203 / REF-196 Phase 3)
+//
+// Each tool's `outputSchema` declares the JSON Schema of the `structuredContent`
+// object produced by `make_tool_result` in the corresponding `handle_call_tool`
+// arm. Declaring it lets MCP clients validate responses and gives the LLM
+// type awareness of the shape it will receive.
+//
+// These are composed from small reusable pieces so the declared schema tracks
+// the real serialization of `QueryResponse` (see `src/models.rs`). A drift test
+// (`tests/mcp_output_schema.rs`) validates a live `search_code` response against
+// `schema_search_output()` to catch divergence.
+//
+// The schemas are intentionally permissive on additional properties
+// (forward-compatible: new optional fields must not break existing clients) but
+// strict on `required` — the fields that are ALWAYS present in that response.
+
+/// `{ start_line, end_line }` — the serialized shape of `models::Span`.
+fn schema_span() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "start_line": { "type": "integer" },
+            "end_line": { "type": "integer" }
+        },
+        "required": ["start_line", "end_line"]
+    })
+}
+
+/// One match within a file — serialized `models::MatchResult`.
+/// `kind` and `symbol` are omitted for plain text matches, so only
+/// `span` + `preview` are guaranteed.
+fn schema_match() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "kind": { "type": "string", "description": "Symbol kind; present only for symbol matches" },
+            "symbol": { "type": "string" },
+            "span": schema_span(),
+            "preview": { "type": "string" },
+            "context_before": { "type": "array", "items": { "type": "string" } },
+            "context_after": { "type": "array", "items": { "type": "string" } }
+        },
+        "required": ["span", "preview"]
+    })
+}
+
+/// A file-grouped result — serialized `models::FileGroupedResult`.
+fn schema_file_result() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "path": { "type": "string" },
+            "language": { "type": "string", "description": "Detected language, lowercased (e.g. \"rust\"); \"unknown\" for unrecognized files" },
+            "dependencies": { "type": "array", "items": { "type": "object" } },
+            "matches": { "type": "array", "items": schema_match() }
+        },
+        "required": ["path", "language", "matches"]
+    })
+}
+
+/// Pagination metadata — serialized `models::PaginationInfo`.
+/// `limit` defaults to `DEFAULT_MCP_RESULT_LIMIT` (200) for list-mode MCP calls.
+fn schema_pagination() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "total": { "type": "integer", "description": "Total matches before offset/limit" },
+            "count": { "type": "integer", "description": "Matches returned in this page" },
+            "offset": { "type": "integer" },
+            "limit": { "type": "integer", "default": 200, "description": "Max results per page (MCP default 200)" },
+            "has_more": { "type": "boolean" }
+        },
+        "required": ["total", "count", "offset", "has_more"]
+    })
+}
+
+/// Reduced `count`-mode payload — `{ count, pattern }`. Emitted by
+/// `search_code`, `search_regex`, and `find_references` when `mode="count"`.
+fn schema_count_result() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "count": { "type": "integer" },
+            "pattern": { "type": "string" }
+        },
+        "required": ["count", "pattern"]
+    })
+}
+
+/// List-mode result for `search_code` / `search_regex`: serialized
+/// `QueryResponse` plus the flattened `has_more`/`total_count`/`returned_count`
+/// scalars that `handle_call_tool` inserts.
+fn schema_search_list() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "status": { "type": "string", "enum": ["fresh", "stale"] },
+            "can_trust_results": { "type": "boolean" },
+            "warning": { "type": "object" },
+            "ai_instruction": { "type": "string" },
+            "pagination": schema_pagination(),
+            "results": { "type": "array", "items": schema_file_result() },
+            "total_count": { "type": "integer" },
+            "returned_count": { "type": "integer" },
+            "has_more": { "type": "boolean" }
+        },
+        "required": ["status", "pagination", "results", "total_count", "returned_count", "has_more"]
+    })
+}
+
+/// `outputSchema` for `search_code` and `search_regex`. `list` mode returns the
+/// full result set; `count` mode returns `{ count, pattern }`.
+fn schema_search_output() -> Value {
+    json!({
+        "description": "list mode (default) returns full results; count mode returns {count, pattern}",
+        "oneOf": [schema_search_list(), schema_count_result()]
+    })
+}
+
+/// `outputSchema` for `find_references`. `list` mode returns the definition plus
+/// flattened references; `count` mode returns `{ count, pattern }`.
+fn schema_find_references_output() -> Value {
+    let list = json!({
+        "type": "object",
+        "properties": {
+            "status": { "type": "string", "enum": ["fresh", "stale"] },
+            "definition": {
+                "type": ["object", "null"],
+                "description": "First matching symbol definition, or null if none exists",
+                "properties": {
+                    "path": { "type": "string" },
+                    "kind": { "type": "string" },
+                    "symbol": { "type": "string" },
+                    "span": schema_span(),
+                    "preview": { "type": "string" }
+                }
+            },
+            "references": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string" },
+                        "line": { "type": "integer" },
+                        "preview": { "type": "string" }
+                    },
+                    "required": ["path", "line", "preview"]
+                }
+            },
+            "total_references": { "type": "integer" },
+            "total_count": { "type": "integer" },
+            "returned_count": { "type": "integer" },
+            "has_more": { "type": "boolean" },
+            "pagination": schema_pagination()
+        },
+        "required": ["status", "definition", "references", "total_references", "total_count", "returned_count", "has_more", "pagination"]
+    });
+    json!({
+        "description": "list mode (default) returns definition + references; count mode returns {count, pattern}",
+        "oneOf": [list, schema_count_result()]
+    })
+}
+
+/// `outputSchema` for `gather_context`. Returns human-readable prose wrapped as
+/// `{ context }` (this arm does not go through `make_tool_result`).
+fn schema_gather_context_output() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "context": { "type": "string", "description": "Human-readable project orientation summary" }
+        },
+        "required": ["context"]
+    })
+}
+
+/// `outputSchema` for `list_locations`: `{ status, total_locations, locations[] }`.
+fn schema_list_locations_output() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "status": { "type": "string", "enum": ["fresh", "stale"] },
+            "total_locations": { "type": "integer" },
+            "locations": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string" },
+                        "line": { "type": "integer" }
+                    },
+                    "required": ["path", "line"]
+                }
+            }
+        },
+        "required": ["status", "total_locations", "locations"]
+    })
+}
+
+/// `outputSchema` for `count_occurrences`: `{ status, pattern, total, files }`.
+fn schema_count_occurrences_output() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "status": { "type": "string", "enum": ["fresh", "stale"] },
+            "pattern": { "type": "string" },
+            "total": { "type": "integer", "description": "Total occurrences across all files" },
+            "files": { "type": "integer", "description": "Number of distinct files containing the pattern" }
+        },
+        "required": ["status", "pattern", "total", "files"]
+    })
+}
+
 /// Handle tools/list request
 ///
 /// When `enable_structural` is false, the five structural-analysis-only tools
@@ -194,7 +407,8 @@ fn handle_list_tools(_params: Option<Value>, enable_structural: bool) -> Result<
                         }
                     },
                     "required": ["pattern"]
-                }
+                },
+                "outputSchema": schema_list_locations_output()
             },
             {
                 "name": "count_occurrences",
@@ -242,7 +456,8 @@ fn handle_list_tools(_params: Option<Value>, enable_structural: bool) -> Result<
                         }
                     },
                     "required": ["pattern"]
-                }
+                },
+                "outputSchema": schema_count_occurrences_output()
             },
             {
                 "name": "search_code",
@@ -319,7 +534,8 @@ fn handle_list_tools(_params: Option<Value>, enable_structural: bool) -> Result<
                         }
                     },
                     "required": ["pattern"]
-                }
+                },
+                "outputSchema": schema_search_output()
             },
             {
                 "name": "search_regex",
@@ -376,7 +592,8 @@ fn handle_list_tools(_params: Option<Value>, enable_structural: bool) -> Result<
                         }
                     },
                     "required": ["pattern"]
-                }
+                },
+                "outputSchema": schema_search_output()
             },
             {
                 "name": "search_ast",
@@ -650,7 +867,8 @@ fn handle_list_tools(_params: Option<Value>, enable_structural: bool) -> Result<
                         }
                     },
                     "required": ["pattern"]
-                }
+                },
+                "outputSchema": schema_find_references_output()
             },
             {
                 "name": "gather_context",
@@ -695,7 +913,8 @@ fn handle_list_tools(_params: Option<Value>, enable_structural: bool) -> Result<
                             "description": "Focus on specific directory path"
                         }
                     }
-                }
+                },
+                "outputSchema": schema_gather_context_output()
             },
             {
                 "name": "check_index_status",

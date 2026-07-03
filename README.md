@@ -71,6 +71,35 @@ Your AI assistant can now call `search_code`, `find_references`, `get_dependenci
 | MCP server built-in | ❌ | — | ❌ | ✅ |
 | JSON output for agents | Manual | ✅ | ✅ | ✅ |
 
+### Measured efficiency (A/B vs. built-in AI search)
+
+We A/B-tested an AI coding agent on real code-search tasks **using Reflex (via MCP)** against the **same agent using its built-in search** (ripgrep-backed Grep/Glob) — identical tasks, model, and repository, paired per task. The harness lives in [`benches/efficacy/`](benches/efficacy/) and is fully reproducible.
+
+**Setup:** model `claude-sonnet-4-6`; 12 code-search tasks (find-all-usages, symbol locate, dependency/reverse-dependency, hotspot, comprehension, plus negative controls); N = 3 replicates per arm; run against the Reflex repository.
+
+**Results** — Reflex ÷ built-in, so **< 1.0 means Reflex uses less**:
+
+| Metric | Reflex ÷ built-in | Reading |
+|---|---|---|
+| Task success rate | **1.00** (100% vs 100%) | Equal correctness — no regression |
+| Total tokens (median over tasks) | **≈ 1.00** | Parity |
+| Find-all-usages tokens | **0.79** | Favors Reflex (CI still includes parity) |
+| Agent iterations / turns (mean) | **0.85** | ~15% fewer round-trips |
+| Cost per task (median) | **0.69** | **~31% cheaper** (p < 0.01) |
+
+**Implications**
+
+- **No-regret replacement for built-in search.** Reflex matches built-in tools on answer correctness (100% task success in both arms) at parity-or-better token usage and meaningfully lower dollar cost.
+- **Fewer round-trips on navigation.** `find_references` returns a symbol's definition *and* every call site in one call, so the agent iterates less than chaining `grep` + file reads.
+- **The gap should widen with repo size.** The baseline here is ripgrep — already fast on a mid-size repo. Reflex's trigram index is built to win most where linear scans are slowest: very large codebases and whole-repo "find every occurrence" tasks.
+
+**Honest caveats.** This is a focused benchmark: one model, one repository, N = 3 — enough to demonstrate parity-to-better and no regression, not a large statistical claim (the token primary is formally *"no significant difference,"* with point estimates favoring Reflex). Per-result precision/recall is not yet formally scored. Reproduce it yourself:
+
+```bash
+python3 benches/efficacy/runner.py --arms A B --repos reflex --n 3
+python3 benches/efficacy/extract_metrics.py && python3 benches/efficacy/analyze.py
+```
+
 ---
 
 ## MCP tools

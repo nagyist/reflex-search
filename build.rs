@@ -47,6 +47,29 @@ fn main() {
         println!("cargo:rerun-if-changed={}", file);
     }
 
+    // REF-212: emit the short git SHA so the running binary can report its build
+    // provenance at startup. This makes a *stale binary* — a benchmark run against
+    // an rfx built before a flag/behaviour change — detectable at a glance, which
+    // is the exact failure mode behind B_sc2 silently running Stage 1. Falls back
+    // to "unknown" when git is unavailable (e.g. source-tarball builds) so the
+    // build never fails on it.
+    let git_sha = std::process::Command::new("git")
+        .args(["rev-parse", "--short", "HEAD"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "unknown".to_string());
+    println!("cargo:rustc-env=REFLEX_GIT_SHA={}", git_sha);
+    // Re-run when HEAD or its reflog moves so the SHA tracks new commits/checkouts.
+    for p in [".git/HEAD", ".git/logs/HEAD"] {
+        if Path::new(p).exists() {
+            println!("cargo:rerun-if-changed={}", p);
+        }
+    }
+
     println!("cargo:warning=Cache schema hash: {}", schema_hash);
 }
 

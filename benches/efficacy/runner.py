@@ -340,6 +340,107 @@ def make_mcp_config(
     return config_path
 
 
+# ---------------------------------------------------------------------------
+# REF-212: MCP flag pre-flight probe
+#
+# The B_sc2 regression (REF-212) was a *stale binary*: REFLEX_MCP_SC_STAGE2=1 was
+# correctly forwarded to `rfx mcp`, but the running binary predated the Stage-2
+# code, so it silently produced Stage-1 output — invalidating a whole trial arm
+# with no visible error. The rfx MCP server now prints a `reflex-mcp startup:`
+# diagnostic to stderr listing the flags it actually resolved. We spawn the
+# binary once per arm and assert the arm's env toggles took effect *before*
+# spending any trials, turning a silent post-hoc discovery into a fast, loud fail.
+# ---------------------------------------------------------------------------
+
+_FALSEY = {"0", "false", "off", "no"}
+_TRUTHY = {"1", "true", "on", "yes"}
+
+
+def _expected_flag_value(var: str, val: str) -> tuple[str, str] | None:
+    """Map a known MCP env toggle to (diagnostic_flag_name, expected 'on'/'off'),
+    mirroring the Rust resolution logic in src/mcp.rs. None for unknown vars."""
+    v = val.strip().lower()
+    if var == "REFLEX_MCP_STRUCTURED_CONTENT":
+        return ("structuredContent", "off" if v in _FALSEY else "on")
+    if var == "REFLEX_MCP_COLUMNAR":
+        return ("columnar", "off" if v in _FALSEY else "on")
+    if var == "REFLEX_MCP_SC_STAGE2":
+        return ("sc_stage2", "on" if v in _TRUTHY else "off")
+    return None
+
+
+def probe_mcp_flags(
+    rfx_binary: Path,
+    mcp_env: dict[str, str] | None,
+) -> dict[str, str] | None:
+    """Spawn `rfx mcp` with `mcp_env` and parse the REF-212 startup diagnostic it
+    prints to stderr. Returns a {flag: value} dict, or None if no diagnostic line
+    was found (e.g. a binary built before REF-212, or a startup failure).
+
+    The server prints the diagnostic before entering its read loop, so closing
+    stdin (EOF) makes it emit the line and exit immediately — no long-lived
+    process to manage or kill.
+    """
+    env = {**os.environ, **(mcp_env or {})}
+    try:
+        proc = subprocess.run(
+            [str(rfx_binary), "mcp"],
+            env=env,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        print(f"  [PROBE] WARN: could not probe rfx mcp flags: {exc}")
+        return None
+    for line in proc.stderr.splitlines():
+        if line.startswith("reflex-mcp startup:"):
+            flags: dict[str, str] = {}
+            for tok in line[len("reflex-mcp startup:"):].split():
+                if "=" in tok:
+                    k, v = tok.split("=", 1)
+                    flags[k] = v
+            return flags
+    return None
+
+
+def verify_mcp_arm_flags(
+    arm_name: str,
+    rfx_binary: Path | None,
+    mcp_env: dict[str, str] | None,
+) -> None:
+    """Pre-flight check (REF-212): confirm the rfx binary honours this arm's env
+    toggles before running any trial. Aborts on a mismatch or a missing
+    diagnostic, because either means the arm's results would be silently invalid.
+    """
+    if rfx_binary is None:
+        return  # non-MCP arm (e.g. arm A) — nothing to verify
+    flags = probe_mcp_flags(rfx_binary, mcp_env)
+    if flags is None:
+        sys.exit(
+            f"FATAL: arm {arm_name}: `rfx mcp` emitted no startup diagnostic. "
+            "The binary predates REF-212 or failed to start — rebuild with "
+            "`cargo build --release` before running MCP arms."
+        )
+    print(f"  [PROBE] {arm_name} resolved MCP flags: build={flags.get('build','?')} "
+          f"structuredContent={flags.get('structuredContent','?')} "
+          f"sc_stage2={flags.get('sc_stage2','?')} columnar={flags.get('columnar','?')}")
+    for var, val in (mcp_env or {}).items():
+        expected = _expected_flag_value(var, val)
+        if expected is None:
+            continue
+        flag_name, want = expected
+        got = flags.get(flag_name)
+        if got != want:
+            sys.exit(
+                f"FATAL: arm {arm_name}: env {var}={val} should yield "
+                f"{flag_name}={want}, but rfx reported {flag_name}={got}. "
+                "This is a STALE BINARY silently ignoring the toggle — rebuild "
+                "rfx (`cargo build --release`). See REF-212."
+            )
+
+
 def transcript_path(arm: str, task_id: str, trial: int) -> Path:
     return RESULTS_DIR / arm / task_id / f"trial_{trial:02d}.ndjson"
 
@@ -453,6 +554,20 @@ def run_trial(
         "started_at": datetime.now(timezone.utc).isoformat(),
     })
 
+    # REF-213: propagate the arm's MCP env toggles through the *parent* `claude`
+    # process, not only the MCP config JSON's `env` block. The config `env` block
+    # (see make_mcp_config) targets the claude→rfx hop, but that layer was not
+    # honoured at trial time (REF-211 QA: B_sc2 behaved as Stage 1 despite
+    # REFLEX_MCP_SC_STAGE2=1), so B_sc2/B_nosc toggles silently no-op'd. Setting
+    # the vars here — on the runner→claude hop — is reliable because stdio MCP
+    # servers inherit their launcher's environment, so the toggle reaches the
+    # spawned `rfx mcp` even if Claude Code drops the per-server `env` override.
+    # A fresh copy per trial keeps arms isolated (no cross-arm leakage).
+    trial_env = os.environ.copy()
+    mcp_env = arm_cfg.get("mcp_env")
+    if mcp_env:
+        trial_env.update(mcp_env)
+
     start_ts = time.monotonic()
     with open(out_path, "w") as f:
         # Write harness metadata as the first NDJSON line
@@ -465,6 +580,7 @@ def run_trial(
             stdout=f,
             stderr=subprocess.PIPE,
             text=True,
+            env=trial_env,
         )
 
     elapsed = time.monotonic() - start_ts
@@ -626,6 +742,11 @@ def main() -> None:
             )
 
             print(f"=== ARM {arm_name}: {arm_cfg['description']} ===")
+
+            # REF-212: fail fast if the binary does not honour this arm's env
+            # toggles (stale-binary guard). Skipped in dry-run (no binary spawn).
+            if not args.dry_run:
+                verify_mcp_arm_flags(arm_name, rfx_bin, arm_cfg.get("mcp_env"))
 
             # Per-arm MCP context-tax baseline (always runs from REPO_ROOT)
             result = run_baseline(

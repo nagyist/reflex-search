@@ -1066,6 +1066,38 @@ fn columnar_enabled() -> bool {
     }
 }
 
+/// REF-212: render a bool as a compact on/off token for the startup diagnostic.
+fn onoff(v: bool) -> &'static str {
+    if v { "on" } else { "off" }
+}
+
+/// REF-212: one-line startup diagnostic summarising the flags the MCP server
+/// resolved from its environment, plus build provenance.
+///
+/// Emitted to **stderr** at startup (never stdout, which carries the JSON-RPC
+/// stream). Claude Code captures an MCP server's stderr into its per-session
+/// `mcp-logs-<server>/` files, so this line is the ground-truth record of which
+/// `structuredContent` / Stage-2 / columnar behaviour a given trial actually ran
+/// with.
+///
+/// It exists specifically to catch the failure mode behind [REF-212]: an env
+/// toggle (`REFLEX_MCP_SC_STAGE2=1`) that *was* forwarded to the process but was
+/// not honoured because the running binary predated the Stage-2 code. The
+/// reported flags reflect what THIS binary actually resolved, and `build=` names
+/// the commit it was compiled from — so a benchmark run against an out-of-date
+/// rfx is obvious rather than silently corrupting results.
+fn startup_flags_line(structured: bool, stage2: bool, columnar: bool, structural: bool) -> String {
+    format!(
+        "reflex-mcp startup: version={} build={} structuredContent={} sc_stage2={} columnar={} structural_tools={}",
+        env!("CARGO_PKG_VERSION"),
+        option_env!("REFLEX_GIT_SHA").unwrap_or("unknown"),
+        onoff(structured),
+        onoff(stage2),
+        onoff(columnar),
+        onoff(structural),
+    )
+}
+
 /// REF-209: reshape a search response's file-grouped `results` array into a
 /// columnar `{ columns, rows }` pair to cut key-repetition token cost.
 ///
@@ -1228,7 +1260,20 @@ fn brief_summary(data: &Value) -> String {
             format!("Found {} match(es) — see structuredContent", total)
         };
     }
-    // count_occurrences
+    // count_occurrences tool: {status, pattern, total, files}. `total` + a
+    // top-level `files` count is that tool's unique signature (search's own
+    // count-mode uses `count`, handled just below; list_locations uses
+    // `total_locations`), so this branch never steals another shape's summary.
+    if let (Some(total), Some(files)) = (
+        data.get("total").and_then(|v| v.as_u64()),
+        data.get("files").and_then(|v| v.as_u64()),
+    ) {
+        return format!(
+            "{} occurrence(s) across {} file(s) — see structuredContent",
+            total, files
+        );
+    }
+    // search_code / search_regex count-mode: {count, pattern}
     if let Some(count) = data.get("count").and_then(|v| v.as_u64()) {
         return format!("{} occurrence(s) — see structuredContent", count);
     }
@@ -2669,6 +2714,20 @@ fn run_mcp_server_io_impl<R: BufRead, W: Write>(
 ) -> Result<()> {
     log::info!("Starting Reflex MCP server on stdio");
 
+    // REF-212: unconditional stderr diagnostic (NOT gated behind RUST_LOG) so the
+    // resolved runtime flags are always captured in Claude Code's mcp-logs. This
+    // is the verification hook for efficacy trials: it proves which behaviour the
+    // running binary actually honoured and pins the exact build it came from.
+    eprintln!(
+        "{}",
+        startup_flags_line(
+            structured_content_enabled(),
+            sc_stage2_enabled(),
+            columnar_enabled(),
+            enable_structural,
+        )
+    );
+
     for line in reader.lines() {
         let line = line?;
 
@@ -2884,6 +2943,26 @@ mod tests {
         );
     }
 
+    // REF-196 Stage 2: count_occurrences ({status,pattern,total,files}) must get
+    // an informative occurrence summary, not the generic "Result —…" fallback.
+    // Its `total`+`files` signature is distinct from search count-mode (`count`)
+    // and list_locations (`total_locations`), so no other shape is mis-summarised.
+    #[test]
+    fn test_brief_summary_count_occurrences_shape() {
+        let data = json!({"status": "fresh", "pattern": "foo", "total": 31, "files": 4});
+        let summary = super::brief_summary(&data);
+        assert!(summary.contains("31 occurrence(s)"), "summary: {summary}");
+        assert!(summary.contains("4 file(s)"), "summary: {summary}");
+        assert!(summary.contains("structuredContent"), "summary: {summary}");
+
+        // search count-mode ({count, pattern}) keeps its own occurrence summary.
+        let count_mode = json!({"count": 7, "pattern": "bar"});
+        assert!(
+            super::brief_summary(&count_mode).contains("7 occurrence(s)"),
+            "count-mode summary should still work"
+        );
+    }
+
     // REF-204: default (env unset) must keep structuredContent enabled so the
     // shipped contract is unchanged unless a caller explicitly opts out.
     #[test]
@@ -2898,6 +2977,28 @@ mod tests {
     fn test_columnar_enabled_default_on() {
         // Relies on REFLEX_MCP_COLUMNAR being unset in the harness environment.
         assert!(super::columnar_enabled());
+    }
+
+    // REF-212: the startup diagnostic must faithfully report every resolved flag
+    // plus build provenance, so a stale binary or an un-honoured env toggle is
+    // visible in Claude Code's mcp-logs for any trial.
+    #[test]
+    fn test_startup_flags_line_reports_resolved_flags() {
+        let line = super::startup_flags_line(true, true, false, true);
+        assert!(line.starts_with("reflex-mcp startup:"), "line: {line}");
+        assert!(line.contains("structuredContent=on"), "line: {line}");
+        assert!(line.contains("sc_stage2=on"), "line: {line}");
+        assert!(line.contains("columnar=off"), "line: {line}");
+        assert!(line.contains("structural_tools=on"), "line: {line}");
+        // Build provenance present so an out-of-date rfx is identifiable.
+        assert!(line.contains("build="), "line: {line}");
+
+        // Inverting every flag flips exactly the on/off tokens.
+        let off = super::startup_flags_line(false, false, true, false);
+        assert!(off.contains("structuredContent=off"), "line: {off}");
+        assert!(off.contains("sc_stage2=off"), "line: {off}");
+        assert!(off.contains("columnar=on"), "line: {off}");
+        assert!(off.contains("structural_tools=off"), "line: {off}");
     }
 
     /// A representative two-file list-mode search response (post-flattening),

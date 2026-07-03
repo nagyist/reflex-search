@@ -205,6 +205,62 @@ search_ast(pattern: "(function_item) @fn", lang: "rust")
 
 ---
 
+## Efficiency Notes (A/B Tested)
+
+### Columnar result format
+
+`search_code` and `search_regex` return results in `{columns, rows}` format by default.
+**Measured savings: 16–24% per-call bytes** vs the legacy `results[]` object shape. The
+`~41%` theoretical estimate assumed file-grouped output; the flat columnar format still
+repeats `path` and `language` on every row, so savings are smaller in practice.
+
+To revert to the legacy shape: `REFLEX_MCP_COLUMNAR=0`.
+
+### Reflex vs built-in grep/glob (total token cost)
+
+**A/B result: Indeterminate — r=1.047, 95% CI [1.016, 2.028]** (n=3 find-all-usages tasks,
+warm index; 33 total trials across 5 task categories; 100% task success in both arms).
+
+Reflex uses **~2–6% more total tokens** than built-in grep/glob at equal turn counts. The
+root cause is the **MCP initialization context tax**: 17 tool schemas are re-transmitted
+every turn, adding overhead that exceeds the columnar format's per-call byte savings.
+
+Turn-count-controlled B/A ratios (equal turns):
+
+| Task | B/A ratio (equal turns) |
+|------|------------------------|
+| extract_symbols (3 turns) | 1.060 |
+| symbolcache (2 turns) | 1.016 |
+| trigramindex (2 turns) | 1.022 |
+| **Median** | **1.022** |
+
+**When to prefer Reflex over built-in grep/glob:**
+- Symbol-aware search (`symbols: true`, `kind: "function"`) — unavailable in grep/glob
+- Dependency analysis (`get_dependencies`, `get_dependents`, `find_hotspots`)
+- Atomic find-all-usages in one call (`find_references`)
+- Large result sets where columnar format reduces payload size
+
+**When built-in grep/glob may be cheaper:** Simple literal string lookups with ≤1 tool call,
+where the context tax outweighs Reflex's capability advantage.
+
+### structuredContent: evaluated and rejected
+
+MCP's `outputSchema` / `structuredContent` mechanism was:
+
+1. **Built** — implemented in `src/mcp.rs` with `outputSchema` on all tool responses
+2. **A/B tested** — ratio **0.998**, no measurable token savings
+3. **Removed** — `content[text]`-only output (current default)
+
+**Root cause:** Claude Code's MCP client transmits *both* `content[text]` *and*
+`structuredContent` to the model. Neither field is dropped, so total token cost is
+identical regardless of whether the server populates `structuredContent`.
+
+`structuredContent` remains viable only for a client that honors `outputSchema` and drops
+the `content[text]` block. Claude Code does not. Do not re-implement without first
+confirming client behavior.
+
+---
+
 ## See Also
 
 - [Claude Code + Reflex MCP Quickstart](./ai-agent-integration.md) — MCP setup, key tools, troubleshooting, and CLI/JSON fallback

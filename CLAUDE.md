@@ -125,8 +125,10 @@ All tool schemas are pre-loaded — **do NOT call ToolSearch** to discover them.
 See [`docs/mcp-tool-cheatsheet.md`](./docs/mcp-tool-cheatsheet.md) for a decision tree by agent intent.
 
 **Columnar result format (`search_code` / `search_regex`, list mode):** To cut token
-cost from repeated JSON keys (~41% on large results), these two tools return matches
-in a columnar shape instead of an array of per-file objects:
+cost from repeated JSON keys, these two tools return matches in a columnar shape
+instead of an array of per-file objects. Measured payload savings: **16–24%** on typical
+query results (the `~41%` estimate assumed file-grouped output; flat columnar still
+repeats `path`/`language` per row):
 
 ```json
 {
@@ -145,6 +147,19 @@ columns (`path`, `language`, `start_line`, `end_line`, `preview`) are always pre
 a match carries them. Top-level metadata (`status`, `pagination`, `total_count`, …) is
 unchanged. Set env `REFLEX_MCP_COLUMNAR=0` to restore the legacy `results[]` object
 shape. `count` mode (`{count, pattern}`) and the other tools are unaffected.
+
+**MCP efficiency — measured A/B results:**
+- **Columnar format saves 16–24% per-call bytes** on `search_code`/`search_regex` payloads.
+- **Reflex vs built-in grep/glob (total tokens):** indeterminate — r=1.047, 95% CI [1.016, 2.028].
+  Per-call byte savings are outweighed by the MCP initialization context tax (~2–6% overhead
+  from schema re-transmission per turn). Reflex's value over grep/glob is **capability**, not
+  token count: symbol filtering, dependency analysis, and atomic `find_references` are unavailable
+  in built-in tools. Both arms completed tasks at 100% success rate.
+- **structuredContent: evaluated and rejected.** MCP `outputSchema`/`structuredContent` was built,
+  A/B tested (ratio 0.998 — no measurable savings because Claude Code transmits *both*
+  `content[text]` and `structuredContent`), and removed. Do not re-attempt unless using a client
+  that honors `outputSchema` and drops the text block. See [`docs/mcp-tool-cheatsheet.md`](./docs/mcp-tool-cheatsheet.md)
+  for the full efficiency notes.
 
 ---
 

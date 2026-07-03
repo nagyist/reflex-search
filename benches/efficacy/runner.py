@@ -137,28 +137,26 @@ ARMS = {
         ),
     },
     # -----------------------------------------------------------------------
-    # REF-204: structuredContent A/B pair (REF-196 Phase 4).
-    #
-    # B_sc and B_nosc are byte-for-byte identical arm-B configs (same Reflex MCP,
-    # same instructions-field nudge, same allowed tools, same model, same tasks).
-    # The ONLY difference is whether the rfx MCP server emits the additive
-    # `structuredContent` field (REF-202). Because REF-202's structuredContent is
-    # purely additive, disabling it via env reproduces the exact pre-REF-202
-    # `content[text]`-only tool-result shape — so B_sc / B_nosc isolates the token
-    # cost of `structuredContent` alone (the REF-204 "B_sc / B" ratio, where
-    # B_nosc IS "plain Reflex MCP"). Both use the current release binary.
+    # RETIRED (REF-215 / REF-217): structuredContent was removed from the MCP
+    # server entirely in REF-215. The env vars REFLEX_MCP_STRUCTURED_CONTENT and
+    # REFLEX_MCP_SC_STAGE2 are no longer recognised by the binary and are silently
+    # ignored, making B_sc / B_nosc / B_sc2 byte-for-byte identical to plain arm B.
+    # These arm defs are preserved here for historical reference (Phase 4 / REF-204
+    # results are in results/B_sc*/ and results/B_nosc*/), but they are NOT included
+    # in the default arms list and should not be used for new runs. See REF-217 for
+    # the current A-vs-B columnar comparison.
     # -----------------------------------------------------------------------
     "B_sc": {
-        "description": "structuredContent ON: Reflex MCP + nudge, tool results carry native structuredContent (REF-202 default)",
+        "description": "[RETIRED REF-215] structuredContent ON arm — structuredContent removed; identical to arm B",
         "mcp_command": "TARGET_RELEASE_RFX",
         "extra_flags": ["--strict-mcp-config", "--dangerously-skip-permissions"],
         "disallowed_tools": [],
         "allowed_tools": BUILTIN_TOOLS_MCP_ARMS + REFLEX_MCP_TOOLS,
         "append_system_prompt": None,
-        "mcp_env": None,  # default => structuredContent emitted
+        "mcp_env": None,
     },
     "B_nosc": {
-        "description": "structuredContent OFF: plain Reflex MCP + nudge (pre-REF-202 content[text]-only shape); baseline for B_sc/B ratio",
+        "description": "[RETIRED REF-215] structuredContent OFF arm — toggle no longer recognised; identical to arm B",
         "mcp_command": "TARGET_RELEASE_RFX",
         "extra_flags": ["--strict-mcp-config", "--dangerously-skip-permissions"],
         "disallowed_tools": [],
@@ -166,17 +164,8 @@ ARMS = {
         "append_system_prompt": None,
         "mcp_env": {"REFLEX_MCP_STRUCTURED_CONTENT": "0"},
     },
-    # -----------------------------------------------------------------------
-    # REF-196 Stage 2: brief summary in content[text] + full data in structuredContent.
-    #
-    # B_sc2 is B_sc with REFLEX_MCP_SC_STAGE2=1: content[text] carries a short
-    # human-readable summary (e.g. "Found 42 matches in 3 files — see structuredContent")
-    # while structuredContent holds the full native JSON object.  This eliminates the
-    # Stage 1 double-payload cost (full JSON in BOTH fields).  B_sc2 / B_nosc is the
-    # headline efficiency comparison: same data, same model, but ~1x payload instead of ~2x.
-    # -----------------------------------------------------------------------
     "B_sc2": {
-        "description": "structuredContent Stage 2: brief summary in content[text], full data in structuredContent (REF-196 Stage 2)",
+        "description": "[RETIRED REF-215] structuredContent Stage 2 arm — toggle no longer recognised; identical to arm B",
         "mcp_command": "TARGET_RELEASE_RFX",
         "extra_flags": ["--strict-mcp-config", "--dangerously-skip-permissions"],
         "disallowed_tools": [],
@@ -636,13 +625,16 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Reflex efficacy A/B runner harness (Phase 2)"
     )
+    # Active arms only (B_sc / B_nosc / B_sc2 retired in REF-215/REF-217 — kept
+    # in ARMS dict for historical reference but excluded from the default run).
+    ACTIVE_ARMS = [k for k in ARMS if k not in ("B_sc", "B_nosc", "B_sc2")]
     parser.add_argument(
         "--arms",
         nargs="+",
-        default=list(ARMS.keys()),
+        default=ACTIVE_ARMS,
         choices=list(ARMS.keys()),
         metavar="ARM",
-        help=f"Arms to run (default: all). Choices: {list(ARMS.keys())}",
+        help=f"Arms to run (default: active arms). Choices: {list(ARMS.keys())}",
     )
     parser.add_argument(
         "--tasks",

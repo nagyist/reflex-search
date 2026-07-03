@@ -120,10 +120,14 @@ if [ -z "$DRY_RUN" ]; then
     2>&1 | tee -a "$LOG_FILE"
 
   echo "" | tee -a "$LOG_FILE"
-  echo "=== Phase 2 statistical analysis (Holm-Bonferroni) ===" | tee -a "$LOG_FILE"
+  echo "=== Phase 2 statistical analysis (Wilcoxon signed-rank + Holm-Bonferroni) ===" | tee -a "$LOG_FILE"
   python3 - <<'PYEOF' 2>&1 | tee -a "$LOG_FILE"
-import csv, statistics, math, sys
+import csv, sys
 from pathlib import Path
+
+# Import the harness stats module (deterministic Wilcoxon + bootstrap CI)
+sys.path.insert(0, str(Path("benches/efficacy")))
+from stats import wilcoxon_signed_rank, paired_bootstrap_ratio_ci, median
 
 csv_path = Path("benches/efficacy/results/metrics_ref225.csv")
 if not csv_path.exists():
@@ -142,48 +146,86 @@ IF_TASK_IDS = [
 ]
 
 ENDPOINTS = ["assistant_turns", "total_tool_calls", "total_tokens"]
+ALPHA = 0.05
 
-def get_vals(arm, endpoint):
-    return [float(r[endpoint]) for r in rows
-            if r.get("arm") == arm and r.get("task_id") in IF_TASK_IDS
-            and r.get(endpoint) and r[endpoint].strip()]
+def get_trial_pairs(endpoint):
+    """Return paired (a_val, b_val) per task×trial for Wilcoxon signed-rank.
+    Pairs on task_id + trial_num so same task/trial is compared across arms."""
+    a_map = {}
+    b_map = {}
+    for r in rows:
+        if r.get("task_id") not in IF_TASK_IDS:
+            continue
+        v = r.get(endpoint, "").strip()
+        if not v:
+            continue
+        try:
+            fv = float(v)
+        except ValueError:
+            continue
+        key = (r["task_id"], r.get("trial", ""))
+        if r.get("arm") == "A":
+            a_map[key] = fv
+        elif r.get("arm") == "B":
+            b_map[key] = fv
+    pairs = [(a_map[k], b_map[k]) for k in a_map if k in b_map]
+    return pairs
 
-print("PRIMARY ENDPOINTS (Holm-Bonferroni, 3 tests):")
-print(f"  {'Endpoint':<25} {'A median':>10} {'B median':>10} {'ratio B/A':>10}  direction")
-print("  " + "-"*70)
+print("PRIMARY ENDPOINTS — paired Wilcoxon signed-rank + 95% bootstrap CI on ratio")
+print(f"  K=3 tests, Holm-Bonferroni FWER control at α={ALPHA}")
+print(f"  {'Endpoint':<25} {'A med':>8} {'B med':>8} {'ratio':>7}  {'p':>6}  {'95% CI':>16}  adj-sig")
+print("  " + "-"*85)
 
-ratios = []
+results = []
 for ep in ENDPOINTS:
-    a_vals = get_vals("A", ep)
-    b_vals = get_vals("B", ep)
-    if not a_vals or not b_vals:
+    pairs = get_trial_pairs(ep)
+    if not pairs:
         print(f"  {ep:<25}  NO DATA")
         continue
-    med_a = statistics.median(a_vals)
-    med_b = statistics.median(b_vals)
+    a_vals = [p[0] for p in pairs]
+    b_vals = [p[1] for p in pairs]
+    wres = wilcoxon_signed_rank(a_vals, b_vals)
+    ci = paired_bootstrap_ratio_ci(pairs, n_boot=2000, level=0.95, seed=42)
+    med_a = median(a_vals)
+    med_b = median(b_vals)
     ratio = med_b / med_a if med_a > 0 else float('inf')
-    direction = "B better" if ratio < 0.95 else ("B worse" if ratio > 1.05 else "parity")
-    ratios.append((ep, med_a, med_b, ratio, direction))
-    print(f"  {ep:<25} {med_a:>10.1f} {med_b:>10.1f} {ratio:>10.3f}  {direction}")
+    results.append(dict(ep=ep, med_a=med_a, med_b=med_b, ratio=ratio,
+                        p=wres.p_value, ci=ci, n=wres.n))
+
+# Holm-Bonferroni correction (sort by p, compare to alpha/(K-rank+1))
+results_sorted = sorted(results, key=lambda r: r["p"])
+K = len(results_sorted)
+for rank, res in enumerate(results_sorted):
+    threshold = ALPHA / (K - rank)
+    res["holm_sig"] = res["p"] < threshold
+    res["holm_threshold"] = threshold
+
+# Print in original endpoint order
+ep_order = {ep: i for i, ep in enumerate(ENDPOINTS)}
+for res in sorted(results, key=lambda r: ep_order.get(r["ep"], 99)):
+    ci = res["ci"]
+    ci_str = f"[{ci.low:.3f}, {ci.high:.3f}]"
+    sig = "* (sig)" if res["holm_sig"] else "ns"
+    print(f"  {res['ep']:<25} {res['med_a']:>8.1f} {res['med_b']:>8.1f} {res['ratio']:>7.3f}  {res['p']:>6.4f}  {ci_str:>16}  {sig}")
 
 print()
-if ratios:
-    directions = [r[4] for r in ratios]
-    all_better = all(d == "B better" for d in directions)
-    all_parity = all(d == "parity" for d in directions)
-    consistent = all(d == directions[0] for d in directions)
-    print(f"  Co-primary direction consistency: {'YES' if consistent else 'NO'}")
-    if all_better:
-        print("  VERDICT: B WINS — Reflex reduces iterations on iteration-forcing tasks")
-    elif all_parity:
-        print("  VERDICT: PARITY — no measurable iteration advantage for Reflex")
-    elif not consistent:
-        print("  VERDICT: MIXED — endpoints disagree; report individually")
-    else:
-        print("  VERDICT: INDETERMINATE — direction consistent but effect size uncertain")
+all_sig = all(r["holm_sig"] for r in results)
+all_ns = all(not r["holm_sig"] for r in results)
+directions = ["B<A" if r["ratio"] < 1 else ("B>A" if r["ratio"] > 1 else "tie") for r in results]
+consistent = len(set(directions)) == 1
+print(f"  Co-primary direction consistency: {'YES ('+directions[0]+')' if consistent else 'NO — mixed'}")
+if all_sig and consistent and directions[0] == "B<A":
+    print("  VERDICT: B WINS — Reflex reduces iterations; all 3 endpoints significant")
+elif all_sig and consistent and directions[0] == "B>A":
+    print("  VERDICT: B LOSES — Reflex increases iterations; all 3 endpoints significant")
+elif all_ns:
+    print("  VERDICT: PARITY — no significant difference on any endpoint (Holm-adjusted)")
+elif not consistent:
+    print("  VERDICT: MIXED — endpoint directions disagree; report individually")
+else:
+    print("  VERDICT: INDETERMINATE — some endpoints significant, some not; see individual p-values")
 
 print()
 print("Full data in: benches/efficacy/results/metrics_ref225.csv")
-print("Run benches/efficacy/stats.py for Wilcoxon p-values and CIs.")
 PYEOF
 fi

@@ -1,0 +1,235 @@
+# Efficacy task corpus — tokio-rs/tokio.
+# Repo pin: tokio @ ab3ff69cf2258a8c696b2dca89a2cef4ff114c1c (tag tokio-1.46.1; see ../repos.md).
+# Schema: ./SCHEMA.md. Ground truth cross-checked by ripgrep (oracle.py) + an
+# independent second method — never by Reflex, to avoid circularity. All
+# counts/sha256 emitted by oracle.py. Paths scoped to specific crate dirs so
+# match sets are bounded and deterministic.
+#
+# expect_reflex is pre-declared before any trial (no cherry-picking).
+
+tasks:
+  # ── Category 1: locate_definition ───────────────────────────────────────────
+  - id: tokio-locate-notify
+    repo: tokio
+    repo_sha: ab3ff69cf2258a8c696b2dca89a2cef4ff114c1c
+    category: locate_definition
+    expect_reflex: neutral
+    prompt: >-
+      In the tokio repository, where is the `Notify` struct defined? Give the
+      exact file and line.
+    ground_truth:
+      type: location
+      file: tokio/src/sync/notify.rs
+      line: 201
+      expect_regex: '^pub struct Notify\b'
+    oracle_notes: >-
+      Cross-checked: (1) `rg -nw 'struct Notify' tokio/src/sync` → single hit at
+      notify.rs:201; (2) anchored `rg -n '^pub struct Notify\b' tokio/src/sync` →
+      single hit; read line 201, confirmed `pub struct Notify {`. `JoinHandle`
+      was rejected as a locate target (defined 3x); `Notify` is unique.
+
+  - id: tokio-locate-asyncseek
+    repo: tokio
+    repo_sha: ab3ff69cf2258a8c696b2dca89a2cef4ff114c1c
+    category: locate_definition
+    expect_reflex: neutral
+    prompt: >-
+      In the tokio repository, where is the `AsyncSeek` trait defined? Give the
+      exact file and line.
+    ground_truth:
+      type: location
+      file: tokio/src/io/async_seek.rs
+      line: 18
+      expect_regex: '^pub trait AsyncSeek\b'
+    oracle_notes: >-
+      Cross-checked: (1) `rg -nw 'trait AsyncSeek' tokio/src/io` → single hit at
+      async_seek.rs:18; (2) anchored `rg -n '^pub trait AsyncSeek\b' tokio/src/io`
+      → single hit; read line 18, confirmed `pub trait AsyncSeek {`. Unique.
+
+  # ── Category 2: find_all_usages ─────────────────────────────────────────────
+  - id: tokio-findall-notified
+    repo: tokio
+    repo_sha: ab3ff69cf2258a8c696b2dca89a2cef4ff114c1c
+    category: find_all_usages
+    expect_reflex: neutral
+    prompt: >-
+      Find every occurrence of the identifier `Notified` in tokio's notify
+      implementation file (`tokio/src/sync/notify.rs`). List each as file:line.
+    ground_truth:
+      type: match_set
+      oracle: { pattern: 'Notified', path: 'tokio/src/sync/notify.rs', flags: ['-w'] }
+      expected_count: 24
+      expected_sha256: '08e31857a9c91f75d03174b7702f6aa80ee8529a67bc46989295894f6eb3874f'
+    oracle_notes: >-
+      Cross-checked: (1) oracle.py match_set count=24; (2) `rg -nw 'Notified'
+      tokio/src/sync/notify.rs | wc -l` = 24 (one match per line, so line count ==
+      unique file:line count).
+
+  - id: tokio-findall-joinerror
+    repo: tokio
+    repo_sha: ab3ff69cf2258a8c696b2dca89a2cef4ff114c1c
+    category: find_all_usages
+    expect_reflex: neutral
+    prompt: >-
+      Find every occurrence of the identifier `JoinError` in tokio's runtime task
+      module (`tokio/src/runtime/task`). List each as file:line.
+    ground_truth:
+      type: match_set
+      oracle: { pattern: 'JoinError', path: 'tokio/src/runtime/task', flags: ['-w'] }
+      expected_count: 33
+      expected_sha256: 'e57100229510e4b1f441a2f98200e0e70c99c49833fd9f08cdf79730ebf9320b'
+    oracle_notes: >-
+      Cross-checked: (1) oracle.py match_set count=33; (2) per-file `rg -cw
+      'JoinError' tokio/src/runtime/task` sums to 33 (abort.rs:2, error.rs:16,
+      join.rs:6, core.rs:1, harness.rs:6, mod.rs:2).
+
+  - id: tokio-findall-barrier
+    repo: tokio
+    repo_sha: ab3ff69cf2258a8c696b2dca89a2cef4ff114c1c
+    category: find_all_usages
+    expect_reflex: neutral
+    prompt: >-
+      Find every occurrence of the identifier `Barrier` in tokio's sync module
+      (`tokio/src/sync`). List each as file:line.
+    ground_truth:
+      type: match_set
+      oracle: { pattern: 'Barrier', path: 'tokio/src/sync', flags: ['-w'] }
+      expected_count: 13
+      expected_sha256: '9e8dbd2eb8e490b07947c216cf2ae3ca53f2e6388d2ab7c88b06612cb72d72be'
+    oracle_notes: >-
+      Cross-checked: (1) oracle.py match_set count=13; (2) per-file `rg -cw
+      'Barrier' tokio/src/sync` sums to 13 (barrier.rs:11, mod.rs:2).
+
+  # ── Category 3: refactor_scope ──────────────────────────────────────────────
+  - id: tokio-refactor-asyncseek
+    repo: tokio
+    repo_sha: ab3ff69cf2258a8c696b2dca89a2cef4ff114c1c
+    category: refactor_scope
+    expect_reflex: neutral
+    prompt: >-
+      You want to rename the `AsyncSeek` trait across the main tokio crate
+      (`tokio/src`). List every file you would need to touch.
+    ground_truth:
+      type: file_set
+      oracle: { pattern: 'AsyncSeek', path: 'tokio/src', flags: ['-w'] }
+      expected_count: 9
+      expected_sha256: '95509863d9078299d3cf2956cea935e3de4f4bea243c616720e6e979da58ec4a'
+      expected_files:
+        - tokio/src/fs/file.rs
+        - tokio/src/io/async_seek.rs
+        - tokio/src/io/mod.rs
+        - tokio/src/io/seek.rs
+        - tokio/src/io/util/async_seek_ext.rs
+        - tokio/src/io/util/buf_reader.rs
+        - tokio/src/io/util/buf_stream.rs
+        - tokio/src/io/util/buf_writer.rs
+        - tokio/src/io/util/empty.rs
+    oracle_notes: >-
+      Cross-checked: (1) oracle.py file_set (-w) count=9; (2) `rg -lw 'AsyncSeek'
+      tokio/src | sort` returned the identical 9-file list.
+
+  # ── Category 4: dependency (imports of a file) ──────────────────────────────
+  - id: tokio-imports-notify
+    repo: tokio
+    repo_sha: ab3ff69cf2258a8c696b2dca89a2cef4ff114c1c
+    category: dependency_imports
+    expect_reflex: neutral
+    prompt: >-
+      What does tokio's `tokio/src/sync/notify.rs` file import? List its top-level
+      `use` declarations (file:line each).
+    ground_truth:
+      type: match_set
+      oracle: { pattern: '^use ', path: 'tokio/src/sync/notify.rs', flags: [] }
+      expected_count: 12
+      expected_sha256: '87e26b31b31720f87313583e9af662ef5cd093cbc959998bcc7cfd8462aea4bd'
+    oracle_notes: >-
+      Cross-checked: (1) oracle.py match_set '^use ' count=12; (2) `rg -c '^use '
+      tokio/src/sync/notify.rs` = 12; read the head — 12 top-level `use` lines
+      (5 `crate::`, 7 `std::`) at lines 8-20, no other `^use ` occurrences.
+
+  # ── Category 4b: reverse dependency ─────────────────────────────────────────
+  - id: tokio-reversedep-batch-semaphore
+    repo: tokio
+    repo_sha: ab3ff69cf2258a8c696b2dca89a2cef4ff114c1c
+    category: reverse_dependency
+    expect_reflex: win
+    prompt: >-
+      Which files in tokio's sync module (`tokio/src/sync`) depend on the
+      `batch_semaphore` module? List every such file.
+    ground_truth:
+      type: file_set
+      oracle: { pattern: 'batch_semaphore', path: 'tokio/src/sync', flags: [] }
+      expected_count: 10
+      expected_sha256: '1410104fa3cf204578335229f084195a76e8b78829ffd2b10eabd0ff3719f1d1'
+      expected_files:
+        - tokio/src/sync/mod.rs
+        - tokio/src/sync/mpsc/bounded.rs
+        - tokio/src/sync/mutex.rs
+        - tokio/src/sync/rwlock.rs
+        - tokio/src/sync/rwlock/read_guard.rs
+        - tokio/src/sync/rwlock/write_guard.rs
+        - tokio/src/sync/rwlock/write_guard_mapped.rs
+        - tokio/src/sync/semaphore.rs
+        - tokio/src/sync/tests/loom_semaphore_batch.rs
+        - tokio/src/sync/tests/semaphore_batch.rs
+    oracle_notes: >-
+      Cross-checked: (1) oracle.py file_set count=10; (2) `rg -l 'batch_semaphore'
+      tokio/src/sync | sort` = same 10 files. `rg -n` confirms every match is a
+      real dependency: 8 files `use crate::sync::batch_semaphore::...` (or
+      `super::batch_semaphore`), mod.rs declares `pub(crate) mod batch_semaphore;`
+      and re-exports its errors. The module's own file is excluded (does not
+      reference its own name). expect_reflex=win: Reflex's dependency engine
+      targets this directly.
+
+  # ── Category 7: comprehension (rubric-graded) ───────────────────────────────
+  - id: tokio-comprehension-coop-budget
+    repo: tokio
+    repo_sha: ab3ff69cf2258a8c696b2dca89a2cef4ff114c1c
+    category: comprehension
+    expect_reflex: win
+    prompt: >-
+      How does tokio's cooperative scheduling (the per-task budget that forces
+      long-running futures to yield) work? Point to the mechanism and the code.
+    ground_truth:
+      type: rubric
+      expected_files:
+        - tokio/src/task/coop/mod.rs
+        - tokio/src/runtime/context.rs
+      required_facts:
+        - "Each task is assigned a per-poll operation budget when it starts running; the initial budget is 128 operations (`Budget::initial()` returns `Budget(Some(128))` in tokio/src/task/coop/mod.rs)."
+        - "The budget is represented by `struct Budget(Option<u8>)`, where `None` (via `Budget::unconstrained()`) means the task is exempt from cooperative-scheduling limits."
+        - "The budget is stored in a thread-local `Cell<coop::Budget>` accessed through `context::budget(...)` in tokio/src/runtime/context.rs, not passed explicitly."
+        - "Resource operations call `coop::poll_proceed(cx)`, which decrements the current budget; when the budget is exhausted it registers the waker and returns `Poll::Pending`, forcing the task to yield back to the executor instead of starving others."
+        - "`poll_proceed` returns a `RestoreOnPending` guard: if the future makes no progress the budget is restored on drop, and the caller must call `RestoreOnPending::made_progress()` so the budget actually empties over repeated polls."
+        - "A future can opt out with `task::unconstrained` / `coop::with_unconstrained`, which runs it with `Budget::unconstrained()` so it is never forced to yield."
+    oracle_notes: >-
+      Rubric task (Phase-5 LLM-judge graded, not machine-scored). Verified
+      expected_files exist and contain the mechanism: tokio/src/task/coop/mod.rs
+      defines `struct Budget(Option<u8>)` (~line 97), `Budget::initial()` →
+      `Budget(Some(128))` (~115-116), `unconstrained()` (~120), `poll_proceed`
+      with decrement + `register_waker` + `Poll::Pending` (~291-311), and the
+      `RestoreOnPending` guard (~257-289). runtime/context.rs holds the
+      thread-local `Cell<coop::Budget>` and the `budget(...)` accessor. Cross-check
+      via `rg -n 'Budget|poll_proceed|unconstrained' tokio/src/task/coop/mod.rs`
+      and `rg -n 'coop::Budget' tokio/src/runtime/context.rs`. expect_reflex=win:
+      gather_context assembles this in one call vs many Read/Grep round-trips.
+
+  # ── Category 8: negative / neutral control ──────────────────────────────────
+  - id: tokio-negctrl-inc-budget-forced-yield
+    repo: tokio
+    repo_sha: ab3ff69cf2258a8c696b2dca89a2cef4ff114c1c
+    category: negative_control
+    expect_reflex: lose
+    prompt: >-
+      In the tokio repository, find every literal occurrence of the string
+      `inc_budget_forced_yield_count` in the main tokio crate (`tokio/src`).
+    ground_truth:
+      type: match_set
+      oracle: { pattern: 'inc_budget_forced_yield_count', path: 'tokio/src', flags: ['-F'] }
+      expected_count: 6
+      expected_sha256: '19378e05f58437e115e9b408d2eb13141862a6e39a3c983ce83a1fa874bf7725'
+    oracle_notes: >-
+      Deliberate negative control. Cross-checked: (1) oracle.py match_set (-F
+      literal) count=6; (2) `rg -Fn 'inc_budget_forced_yield_count' tokio/src` →
+      same 6 lines (metric method def in runtime/metrics/scheduler.rs:32 plus 5
+      sites in task/coop/mod.rs: 303, 332, 334, 341, 351). expect_reflex=lose.

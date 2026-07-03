@@ -37,3 +37,9 @@ reflex
 # Insta pending-snapshot files — committed `.snap` files are the baseline
 *.snap.new
 *.pending-snap
+# Efficacy A/B benchmark: harness/tooling is tracked; run outputs & corpus are NOT
+/benches/efficacy/results/
+/benches/efficacy/results-*/
+/benches/efficacy/corpus/
+benches/efficacy/__pycache__/
+*.pyc

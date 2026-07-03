@@ -1,0 +1,284 @@
+# Efficacy task corpus — Reflex repository (thin-slice backbone).
+# Repo pin: reflex @ d2935f48f5abea2a76b479040a23478155be9bb0 (see ../repos.md).
+# Schema: ./SCHEMA.md. Ground truth cross-checked by ripgrep + manual inspection
+# (+ tree-sitter for definitions) — never by Reflex, to avoid circularity.
+#
+# expect_reflex is pre-declared BEFORE any trial (no cherry-picking):
+#   - find_all_usages / locate are `neutral`: ripgrep is already complete-coverage
+#     and token-lean (Phase 0 showed Grep cheaper than Reflex on extract_symbols).
+#     find_all_usages is also the PRE-REGISTERED PRIMARY endpoint.
+#   - `win` only where a purpose-built Reflex tool plausibly beats grep.
+#   - `lose` for the trivial literal-grep control.
+
+tasks:
+  # ── Category 1: locate_definition ───────────────────────────────────────────
+  - id: reflex-locate-trigramindex
+    repo: reflex
+    repo_sha: d2935f48f5abea2a76b479040a23478155be9bb0
+    category: locate_definition
+    expect_reflex: neutral
+    prompt: >-
+      In the Reflex repository, where is the `TrigramIndex` struct defined?
+      Give the exact file path and line number.
+    ground_truth:
+      type: location
+      file: src/trigram.rs
+      line: 184
+      expect_regex: '^pub struct TrigramIndex \{'
+    oracle_notes: >-
+      Cross-checked: (1) `rg -nw 'struct TrigramIndex' src` returns exactly one
+      hit (src/trigram.rs:184) — unique definition; (2) manually read the line,
+      confirmed it is the struct definition, not a usage or impl header.
+
+  - id: reflex-locate-queryengine
+    repo: reflex
+    repo_sha: d2935f48f5abea2a76b479040a23478155be9bb0
+    category: locate_definition
+    expect_reflex: neutral
+    prompt: >-
+      In the Reflex repository, where is the `QueryEngine` struct defined?
+      Give the exact file path and line number.
+    ground_truth:
+      type: location
+      file: src/query/mod.rs
+      line: 26
+      expect_regex: '^pub struct QueryEngine \{'
+    oracle_notes: >-
+      Cross-checked: (1) `rg -nw 'struct QueryEngine' src` returns exactly one
+      hit (src/query/mod.rs:26); (2) manual read confirms the definition line.
+
+  # ── Category 2: find_all_usages (PRE-REGISTERED PRIMARY) ────────────────────
+  - id: reflex-findall-extract_symbols
+    repo: reflex
+    repo_sha: d2935f48f5abea2a76b479040a23478155be9bb0
+    category: find_all_usages
+    expect_reflex: neutral
+    prompt: >-
+      Find every occurrence of the identifier `extract_symbols` in the Reflex
+      codebase (the `src/` tree). List each as file:line.
+    ground_truth:
+      type: match_set
+      oracle: { pattern: 'extract_symbols', path: 'src', flags: ['-w'] }
+      expected_count: 122
+      expected_sha256: '91ad6e25a34481fd832eb4129128889bda187529a00917661af8de7ed0e6a1e4'
+    oracle_notes: >-
+      This is the Phase 0 canonical thin-slice task and the pre-registered
+      primary endpoint. Cross-checked: (1) oracle.py match_set (word-boundary)
+      count=122; (2) `rg -nw 'fn extract_symbols' src/parsers` confirms 15 of
+      those are the per-language definitions; the remaining 107 are call sites /
+      references, spot-checked manually across parsers/mod.rs and symbol_cache.rs.
+
+  - id: reflex-findall-symbolcache
+    repo: reflex
+    repo_sha: d2935f48f5abea2a76b479040a23478155be9bb0
+    category: find_all_usages
+    expect_reflex: neutral
+    prompt: >-
+      Find every occurrence of the identifier `SymbolCache` in the Reflex `src/`
+      tree. List each as file:line.
+    ground_truth:
+      type: match_set
+      oracle: { pattern: 'SymbolCache', path: 'src', flags: ['-w'] }
+      expected_count: 12
+      expected_sha256: 'f322707505884c2083e89e1188d8471196bf9d41e31adb77d7aa160d5b0554ee'
+    oracle_notes: >-
+      Cross-checked: (1) oracle.py match_set count=12; (2) per-file `rg -cw
+      SymbolCache src` tally sums to 12; the sole definition is
+      src/symbol_cache.rs:18 (`pub struct SymbolCache`), remainder are usages.
+
+  - id: reflex-findall-trigramindex
+    repo: reflex
+    repo_sha: d2935f48f5abea2a76b479040a23478155be9bb0
+    category: find_all_usages
+    expect_reflex: neutral
+    prompt: >-
+      Find every occurrence of the identifier `TrigramIndex` in the Reflex `src/`
+      tree. List each as file:line.
+    ground_truth:
+      type: match_set
+      oracle: { pattern: 'TrigramIndex', path: 'src', flags: ['-w'] }
+      expected_count: 21
+      expected_sha256: '6b7ac72ceb5bb11c5c078667ed01c54769a3e1fcd15abe62cefc2510bdcbc113'
+    oracle_notes: >-
+      Cross-checked: (1) oracle.py match_set count=21; (2) per-file `rg -cw`
+      tally; definition at src/trigram.rs:184, rest are usages across indexer,
+      query, and regex_trigrams modules.
+
+  # ── Category 3: refactor_scope ──────────────────────────────────────────────
+  - id: reflex-refactor-rename-queryengine
+    repo: reflex
+    repo_sha: d2935f48f5abea2a76b479040a23478155be9bb0
+    category: refactor_scope
+    expect_reflex: neutral
+    prompt: >-
+      You want to rename the `QueryEngine` type across the Reflex codebase. List
+      every file under `src/` you would need to touch.
+    ground_truth:
+      type: file_set
+      oracle: { pattern: 'QueryEngine', path: 'src', flags: ['-w'] }
+      expected_count: 13
+      expected_sha256: 'a0ea43d70040b1b7e97352c777ee790b003f7450a13128be87477360b79723f1'
+      expected_files:
+        - src/cli/query.rs
+        - src/cli/serve.rs
+        - src/interactive/app.rs
+        - src/lib.rs
+        - src/mcp.rs
+        - src/pulse/glossary.rs
+        - src/pulse/narrate.rs
+        - src/pulse/wiki.rs
+        - src/query/mod.rs
+        - src/regex_trigrams.rs
+        - src/semantic/executor.rs
+        - src/semantic/tools.rs
+        - src/symbol_cache.rs
+    oracle_notes: >-
+      Recall-heavy set. Cross-checked: (1) oracle.py file_set (word-boundary)
+      count=13; (2) `rg -lw QueryEngine src` file list matches exactly; manually
+      confirmed each file references the type (import, field, or usage).
+
+  # ── Category 4: dependency (imports of a file) ──────────────────────────────
+  - id: reflex-deps-imports-mcp
+    repo: reflex
+    repo_sha: d2935f48f5abea2a76b479040a23478155be9bb0
+    category: dependency_imports
+    expect_reflex: neutral
+    prompt: >-
+      What does the file `src/mcp.rs` import? List its top-level `use`
+      declarations (file:line for each).
+    ground_truth:
+      type: match_set
+      oracle: { pattern: '^use ', path: 'src/mcp.rs', flags: [] }
+      expected_count: 10
+      expected_sha256: '24c265da04775605d68e9aed6a60150d039952f54d275945636d4dfc3141d229'
+    oracle_notes: >-
+      Cross-checked: (1) oracle.py match_set on `^use ` scoped to the single file
+      → 10 top-level use lines (6-10, 12-16); (2) manually read the head of
+      src/mcp.rs and confirmed no top-level `use` beyond line 16 and that the
+      gap (line 11) is a blank/comment, not a use. Function-local `use` are
+      intentionally excluded (top-level import surface only).
+
+  # ── Category 4b: reverse dependency (what depends on a module) ──────────────
+  - id: reflex-deps-dependents-trigram
+    repo: reflex
+    repo_sha: d2935f48f5abea2a76b479040a23478155be9bb0
+    category: reverse_dependency
+    expect_reflex: win
+    prompt: >-
+      Which files in `src/` depend on the `trigram` module (i.e. reference
+      `crate::trigram`)? List every such file.
+    ground_truth:
+      type: file_set
+      oracle: { pattern: 'crate::trigram\b', path: 'src', flags: [] }
+      expected_count: 4
+      expected_sha256: '3e4251ff95536b41b309b626bb1072c99641834c87bae42b545309663bad84d0'
+      expected_files:
+        - src/indexer.rs
+        - src/query/mod.rs
+        - src/query/result.rs
+        - src/regex_trigrams.rs
+    oracle_notes: >-
+      Cross-checked: (1) oracle.py file_set on `crate::trigram\b` → 4 files;
+      (2) manually opened each and confirmed a real `use crate::trigram::...` or
+      path reference (not a comment). expect_reflex=win: Reflex's dependency
+      engine (get_dependents) targets exactly this, vs grep needing careful
+      path-pattern crafting to avoid comment/string noise.
+
+  # ── Category 5: hotspot discovery ───────────────────────────────────────────
+  - id: reflex-hotspot-most-imported
+    repo: reflex
+    repo_sha: d2935f48f5abea2a76b479040a23478155be9bb0
+    category: hotspot
+    expect_reflex: win
+    prompt: >-
+      Which internal module in the Reflex `src/` tree is depended on (referenced
+      via `crate::<module>`) by the most other files? Name the single top module.
+    ground_truth:
+      type: ranking
+      metric: file_set_count
+      pattern_template: 'crate::{name}\b'
+      path: src
+      flags: []
+      candidates: [models, cache, parsers, indexer, content_store, query, trigram, formatter, output, errors]
+      expected_top: models
+      expected_counts: { models: 46, cache: 34, parsers: 19 }
+    oracle_notes: >-
+      Cross-checked: (1) oracle.py file_set count per candidate module —
+      models=46 (max) > cache=34 > parsers=19 > indexer=8 > query=7 >
+      content_store=5; (2) manually confirmed models is the shared type module
+      (Language, SymbolKind, IndexConfig) imported almost everywhere.
+      expect_reflex=win: `analyze --hotspots` / find_hotspots computes this
+      directly; grep requires manual per-module aggregation.
+
+  # ── Category 6: cross-module API (implemented + consumed) ───────────────────
+  - id: reflex-crossmodule-extract_symbols-impls
+    repo: reflex
+    repo_sha: d2935f48f5abea2a76b479040a23478155be9bb0
+    category: cross_module
+    expect_reflex: neutral
+    prompt: >-
+      Reflex parses 15 languages. Each language parser implements a private
+      `extract_symbols` function. List every file that DEFINES an
+      `extract_symbols` function, and name where these implementations are
+      dispatched from (the consumer).
+    ground_truth:
+      type: match_set
+      oracle: { pattern: 'fn extract_symbols', path: 'src/parsers', flags: ['-w'] }
+      expected_count: 15
+      expected_sha256: '4bdd247d6c3ff459be18cafecb446ebb1741490c9a0e37e48f867854ef2cd341'
+    oracle_notes: >-
+      Definitions cross-checked: (1) oracle.py match_set on `fn extract_symbols`
+      in src/parsers → 15 files (one per language: rust, python, typescript, go,
+      java, c, cpp, csharp, php, ruby, kotlin, zig, swift, vue, svelte);
+      (2) manually confirmed each is a `fn extract_symbols(` definition. The
+      DISPATCH/consumer is src/parsers/mod.rs (the `Language::X => x::parse(...)`
+      match around lines 217-228, where each parse() invokes its module's
+      extract_symbols) — verified by reading parsers/mod.rs. Corpus is all-Rust
+      per CEO lock, so this is the cross-MODULE realisation of the cross-language
+      category (see SCHEMA.md).
+
+  # ── Category 7: comprehension (rubric-graded) ───────────────────────────────
+  - id: reflex-comprehension-incremental
+    repo: reflex
+    repo_sha: d2935f48f5abea2a76b479040a23478155be9bb0
+    category: comprehension
+    expect_reflex: win
+    prompt: >-
+      How does Reflex avoid re-indexing files that have not changed between
+      indexing runs? Explain the mechanism and point to the code that implements
+      it.
+    ground_truth:
+      type: rubric
+      expected_files:
+        - src/indexer.rs
+      required_facts:
+        - "Files are content-hashed with blake3 via Indexer::hash_content() (src/indexer.rs ~line 2043)."
+        - "Per-file hashes are loaded for the current branch (load_hashes_for_branch) and the current hash is compared to the stored hash."
+        - "A file is only re-indexed when its blake3 hash differs; unchanged files are skipped."
+    oracle_notes: >-
+      Rubric task (Phase-5 LLM-judge graded, not machine-scored). Verified the
+      mechanism by reading src/indexer.rs: hash_content() at line 2043 wraps
+      blake3::hash; existing_hashes loaded at line 164; the compare-and-skip is
+      at lines 219-224 (`if &current_hash != existing_hash`). expect_reflex=win:
+      gather_context assembles this in one call vs multiple Read/Grep round-trips.
+
+  # ── Category 8: negative / neutral control ──────────────────────────────────
+  - id: reflex-control-literal-port
+    repo: reflex
+    repo_sha: d2935f48f5abea2a76b479040a23478155be9bb0
+    category: negative_control
+    expect_reflex: lose
+    prompt: >-
+      Find every line in the Reflex `src/` tree containing the literal string
+      `7878` (the default server port).
+    ground_truth:
+      type: match_set
+      oracle: { pattern: '7878', path: 'src', flags: ['-F'] }
+      expected_count: 1
+      expected_sha256: 'ec94536151d406cf9b5aafd966d5d3cd35902c1bde55332aa2e58e82306b1d34'
+    oracle_notes: >-
+      Deliberate negative control: a trivial literal grep. Cross-checked:
+      (1) oracle.py match_set fixed-string → 1 hit (src/cli/mod.rs:297);
+      (2) manual read confirms it is the default port literal. expect_reflex=lose:
+      one-shot ripgrep answers this instantly; Reflex's index build + 17-tool MCP
+      context tax is pure overhead here — the case where the index should lose.

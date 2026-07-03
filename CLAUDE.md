@@ -85,7 +85,44 @@ rfx analyze --hotspots           # Find most-imported files
 **Other:**
 ```bash
 rfx serve --port 7878            # HTTP API server
+rfx mcp                          # Start MCP server on stdio (for AI coding assistants)
 ```
+
+---
+
+## MCP Tools (for AI Coding Assistants)
+
+When using Reflex as an MCP server (`rfx mcp`), the following tools are available as `mcp__reflex__<name>`.
+All tool schemas are pre-loaded — **do NOT call ToolSearch** to discover them.
+
+**Core search:**
+| Tool | Purpose |
+|------|---------|
+| `check_index_status` | Check if index is fresh before searching |
+| `search_code` | Full-text search with previews (default limit: 200) |
+| `search_regex` | Regex pattern search (use for `->`, `::`, `()`, etc.) |
+| `list_locations` | Path+line only — cheapest, no content loaded |
+| `count_occurrences` | Count matches without loading content |
+| `find_references` | Definition + all usages in one atomic call (default limit: 200) |
+| `gather_context` | Project structure, frameworks, entry points |
+| `search_ast` | Tree-sitter AST pattern matching (⚠️ slow — requires `glob`) |
+
+**Index management:**
+| Tool | Purpose |
+|------|---------|
+| `index_project` | Build or update the search index |
+
+**Dependency analysis:**
+| Tool | Purpose |
+|------|---------|
+| `get_dependencies` | What a file imports |
+| `get_dependents` | What imports a file (reverse lookup) |
+| `find_hotspots` | Most-imported files by dependent count |
+
+**Structural analysis** (requires `[mcp] enable_structural_tools = true` in `~/.reflex/config.toml`):
+`find_circular` · `find_islands` · `find_unused` · `analyze_summary` · `get_transitive_deps`
+
+See [`docs/mcp-tool-cheatsheet.md`](./docs/mcp-tool-cheatsheet.md) for a decision tree by agent intent.
 
 ---
 

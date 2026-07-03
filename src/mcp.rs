@@ -133,7 +133,7 @@ fn handle_initialize(_params: Option<Value>) -> Result<Value> {
             "name": "reflex",
             "version": env!("CARGO_PKG_VERSION")
         },
-        "instructions": "If mcp__reflex__* tools appear in your available tool list, prefer them over Grep and Glob for code search tasks. Their schemas are pre-loaded — do NOT call ToolSearch before using them. If you see 'Index not found', call mcp__reflex__index_project first, then retry."
+        "instructions": "Reflex MCP tools are pre-loaded — do NOT call ToolSearch. Available tools (all prefixed mcp__reflex__): check_index_status · search_code · search_regex · list_locations · count_occurrences · find_references · gather_context · index_project · get_dependencies · get_dependents · find_hotspots · search_ast. Structural tools (if enabled): find_circular · find_islands · find_unused · analyze_summary · get_transitive_deps. Prefer these over Grep and Glob for code search. If you see 'Index not found', call mcp__reflex__index_project first, then retry."
     }))
 }
 
@@ -281,7 +281,7 @@ fn handle_list_tools(_params: Option<Value>, enable_structural: bool) -> Result<
                         },
                         "limit": {
                             "type": "integer",
-                            "description": "Maximum results per page (default: 50, max: 500). IMPORTANT: If response.has_more is true, you MUST fetch more pages using offset parameter."
+                            "description": "Maximum results per page (default: 200, max: 500). The 200-result default covers most find-all tasks in a single call. IMPORTANT: If response.has_more is true, you MUST fetch more pages using offset parameter."
                         },
                         "offset": {
                             "type": "integer",
@@ -346,7 +346,7 @@ fn handle_list_tools(_params: Option<Value>, enable_structural: bool) -> Result<
                         },
                         "limit": {
                             "type": "integer",
-                            "description": "Maximum number of results (default: 50, max: 500). Use with offset for pagination."
+                            "description": "Maximum number of results (default: 200, max: 500). Use with offset for pagination."
                         },
                         "offset": {
                             "type": "integer",
@@ -634,7 +634,7 @@ fn handle_list_tools(_params: Option<Value>, enable_structural: bool) -> Result<
                         },
                         "limit": {
                             "type": "integer",
-                            "description": "Max references per page (default: 50, max: 500). Pagination applies to references only."
+                            "description": "Max references per page (default: 200, max: 500). The 200-result default covers most find-all tasks in a single call. Pagination applies to references only."
                         },
                         "offset": {
                             "type": "integer",
@@ -2313,7 +2313,7 @@ mod tests {
         assert_eq!(resp["result"]["serverInfo"]["name"], "reflex");
     }
 
-    // REF-185: tool schemas must advertise the new default limits (50) and max cap (500)
+    // REF-200: tool schemas must advertise the correct default limit (200, raised from 50 in REF-191) and max cap (500)
     #[test]
     fn test_tool_schema_limit_defaults() {
         let req = r#"{"jsonrpc":"2.0","id":5,"method":"tools/list","params":null}"#;
@@ -2334,8 +2334,8 @@ mod tests {
                 .as_str()
                 .unwrap_or_else(|| panic!("{}: missing limit description", tool_name));
             assert!(
-                limit_desc.contains("50"),
-                "{}: limit description should mention default 50, got: {}",
+                limit_desc.contains("200"),
+                "{}: limit description should mention default 200, got: {}",
                 tool_name,
                 limit_desc
             );

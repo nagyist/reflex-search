@@ -125,10 +125,19 @@ index_project()
 | `analyze_summary` | 🟡 Medium | Counts: circular/hotspots/unused | — |
 | `find_hotspots` | 🟡 Medium | Files by import count | — |
 | `find_unused` | 🟡 Medium | Orphaned file list | — |
-| `find_circular` | 🟡 Medium | Cycle arrays | — |
-| `find_islands` | 🟡 Medium | Isolated component groups | — |
+| `find_circular` | 🟡 Medium | Cycle arrays | — | opt-in |
+| `find_islands` | 🟡 Medium | Isolated component groups | — | opt-in |
 | `index_project` | 🔴 Slow (write) | Status + stats | — |
 | `search_ast` | 🔴 Slowest | Structural matches | `pattern`, `lang` + glob |
+
+> **Structural analysis tools** (`find_circular`, `find_islands`, `find_unused`, `analyze_summary`,
+> `get_transitive_deps`) are shown by default. To hide them and reduce the tool surface for AI agents,
+> add to `~/.reflex/config.toml`:
+>
+> ```toml
+> [mcp]
+> enable_structural_tools = false  # hides find_circular, find_islands, find_unused, analyze_summary, get_transitive_deps
+> ```
 
 ---
 

@@ -1692,7 +1692,11 @@ mod path_resolution_tests {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         write_file(root, "crates/a/Cargo.toml", "[package]\nname = \"a\"\n");
-        write_file(root, "crates/a/src/lib.rs", "pub mod thing;\npub mod user;\n");
+        write_file(
+            root,
+            "crates/a/src/lib.rs",
+            "pub mod thing;\npub mod user;\n",
+        );
         write_file(root, "crates/a/src/thing.rs", "pub struct Thing;\n");
         write_file(root, "crates/a/src/thing/inner.rs", "pub struct Deep;\n");
         write_file(root, "crates/a/src/user.rs", "use crate::thing::Thing;\n");
@@ -1739,7 +1743,11 @@ mod path_resolution_tests {
     fn test_super_trailing_item() {
         // From crates/a/src/sub/mod.rs, super::thing::Thing -> crates/a/src/thing.rs
         let tmp = make_workspace();
-        write_file(tmp.path(), "crates/a/src/sub/mod.rs", "use super::thing::Thing;\n");
+        write_file(
+            tmp.path(),
+            "crates/a/src/sub/mod.rs",
+            "use super::thing::Thing;\n",
+        );
         let root = tmp.path().to_str().unwrap();
         let result = resolve_rust_use_to_path(
             "super::thing::Thing",

@@ -150,11 +150,14 @@ shape. `count` mode (`{count, pattern}`) and the other tools are unaffected.
 
 **MCP efficiency — measured A/B results:**
 - **Columnar format saves 16–24% per-call bytes** on `search_code`/`search_regex` payloads.
-- **Reflex vs built-in grep/glob (total tokens):** indeterminate — r=1.047, 95% CI [1.016, 2.028].
-  Per-call byte savings are outweighed by the MCP initialization context tax (~2–6% overhead
-  from schema re-transmission per turn). Reflex's value over grep/glob is **capability**, not
-  token count: symbol filtering, dependency analysis, and atomic `find_references` are unavailable
-  in built-in tools. Both arms completed tasks at 100% success rate.
+- **Reflex vs built-in grep/glob (total tokens):** indeterminate — r=1.044, 95% CI [1.014, 1.262]
+  (REF-222 powered rerun: n=9 tasks × 8 trials × claude-sonnet-4-6; CI width 0.248 vs REF-217's
+  1.012 — 4× tighter). Prior run at n=3 was noise; both runs land at the same Indeterminate verdict
+  with the same point estimate (~1.04). At equal turn counts, overhead is only ~1–2% (tool schema
+  context per turn); turn-count variance drives the spread (corr ≈ 0.99, per REF-204).
+  Reflex's value over grep/glob is **capability**, not token count: symbol filtering, dependency
+  analysis, and atomic `find_references` are unavailable in built-in tools. Both arms completed
+  tasks at 100% success rate; arm B showed higher recall on large result sets (graded accuracy).
 - **structuredContent: evaluated and rejected.** MCP `outputSchema`/`structuredContent` was built,
   A/B tested (ratio 0.998 — no measurable savings because Claude Code transmits *both*
   `content[text]` and `structuredContent`), and removed. Do not re-attempt unless using a client

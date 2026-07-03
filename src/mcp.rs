@@ -953,7 +953,7 @@ fn handle_list_tools(_params: Option<Value>, enable_structural: bool) -> Result<
 /// results are surfaced through the JSON-RPC error channel in `process_request`,
 /// never as a tool result, so there are no `isError` responses to preserve here.
 fn make_tool_result(data: Value) -> Value {
-    make_tool_result_with(data, structured_content_enabled())
+    make_tool_result_with(data, structured_content_enabled(), sc_stage2_enabled())
 }
 
 /// REF-204: A/B efficacy switch for the additive `structuredContent` field.
@@ -974,15 +974,117 @@ fn structured_content_enabled() -> bool {
     }
 }
 
+/// REF-196 Stage 2: replace `content[text]` with a brief human summary.
+///
+/// When enabled, `content[text]` carries a short description (e.g. "Found 42
+/// matches in 3 files — see structuredContent") while the full data lives in
+/// `structuredContent`. This eliminates the Stage 1 double-payload cost: Stage 1
+/// emitted both the full JSON string AND the native object; Stage 2 emits only
+/// the summary string + the native object, so total token cost ≈ data once.
+///
+/// Only meaningful when `REFLEX_MCP_STRUCTURED_CONTENT` is also enabled.
+fn sc_stage2_enabled() -> bool {
+    match std::env::var("REFLEX_MCP_SC_STAGE2") {
+        Ok(v) => matches!(
+            v.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "on" | "yes"
+        ),
+        Err(_) => false,
+    }
+}
+
+/// Generate a brief human-readable summary of a tool result for Stage 2
+/// `content[text]`. Inspects common result shape fields to produce a concise
+/// description. Falls back to a generic message for unrecognised shapes.
+fn brief_summary(data: &Value) -> String {
+    // find_references: definition + usages
+    if let Some(usages) = data.get("usages").and_then(|v| v.as_array()) {
+        let n = data
+            .get("total_count")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(usages.len() as u64);
+        let has_def = !data.get("definition").map(|v| v.is_null()).unwrap_or(true);
+        return if has_def {
+            format!("Definition + {} usage(s) — see structuredContent", n)
+        } else {
+            format!("{} usage(s) — see structuredContent", n)
+        };
+    }
+    // search_code / search_regex / find_references pagination shape
+    if let Some(pagination) = data.get("pagination") {
+        let total = pagination
+            .get("total")
+            .and_then(|v| v.as_u64())
+            .or_else(|| data.get("total_count").and_then(|v| v.as_u64()))
+            .unwrap_or(0);
+        let file_count = data
+            .get("results")
+            .and_then(|v| v.as_array())
+            .map(|a| a.len())
+            .unwrap_or(0);
+        return if file_count > 0 {
+            format!(
+                "Found {} match(es) across {} file(s) — see structuredContent",
+                total, file_count
+            )
+        } else {
+            format!("Found {} match(es) — see structuredContent", total)
+        };
+    }
+    // count_occurrences
+    if let Some(count) = data.get("count").and_then(|v| v.as_u64()) {
+        return format!("{} occurrence(s) — see structuredContent", count);
+    }
+    // list_locations
+    if let Some(n) = data
+        .get("total_locations")
+        .and_then(|v| v.as_u64())
+        .or_else(|| {
+            data.get("locations")
+                .and_then(|v| v.as_array())
+                .map(|a| a.len() as u64)
+        })
+    {
+        return format!("{} location(s) — see structuredContent", n);
+    }
+    // gather_context / project summary
+    if data.get("entry_points").is_some() || data.get("directory_structure").is_some() {
+        let files = data
+            .get("index_stats")
+            .and_then(|s| s.get("total_files"))
+            .and_then(|v| v.as_u64());
+        return match files {
+            Some(n) => format!("Project context: {} file(s) — see structuredContent", n),
+            None => "Project context — see structuredContent".to_string(),
+        };
+    }
+    // generic dependency / hotspot results
+    if let Some(arr) = data
+        .get("dependencies")
+        .or_else(|| data.get("dependents"))
+        .or_else(|| data.get("hotspots"))
+        .and_then(|v| v.as_array())
+    {
+        return format!("{} item(s) — see structuredContent", arr.len());
+    }
+    "Result — see structuredContent".to_string()
+}
+
 /// Inner builder split out from [`make_tool_result`] so both output shapes are
 /// unit-testable without mutating process-global env (which would race cargo's
-/// parallel test threads). `structured = true` adds the `structuredContent`
-/// object; `false` emits only the legacy `content[text]` JSON string.
-fn make_tool_result_with(data: Value, structured: bool) -> Value {
-    let content = json!([{
-        "type": "text",
-        "text": serde_json::to_string(&data).unwrap_or_default()
-    }]);
+/// parallel test threads).
+///
+/// - `structured = false`: legacy `content[text]`-only JSON string (B_nosc arm)
+/// - `structured = true, stage2 = false`: Stage 1 — full JSON in both fields (B_sc arm)
+/// - `structured = true, stage2 = true`: Stage 2 — brief summary in `content[text]`,
+///   full data in `structuredContent` (B_sc2 arm; the token-saving production target)
+fn make_tool_result_with(data: Value, structured: bool, stage2: bool) -> Value {
+    let text = if structured && stage2 {
+        brief_summary(&data)
+    } else {
+        serde_json::to_string(&data).unwrap_or_default()
+    };
+    let content = json!([{"type": "text", "text": text}]);
     if structured {
         json!({ "content": content, "structuredContent": data })
     } else {
@@ -2528,8 +2630,8 @@ mod tests {
     #[test]
     fn test_make_tool_result_toggle_off_omits_structured_content() {
         let data = json!({"status": "fresh", "count": 3});
-        let on = super::make_tool_result_with(data.clone(), true);
-        let off = super::make_tool_result_with(data.clone(), false);
+        let on = super::make_tool_result_with(data.clone(), true, false);
+        let off = super::make_tool_result_with(data.clone(), false, false);
 
         // Enabled shape matches the shipped REF-202 default.
         assert_eq!(on["structuredContent"], data);
@@ -2539,6 +2641,38 @@ mod tests {
         // ...but leaves content[text] byte-identical, so the only measured
         // difference between the B and B_sc arms is the extra field.
         assert_eq!(off["content"], on["content"]);
+    }
+
+    // REF-196 Stage 2: brief summary in content[text], full data in structuredContent.
+    #[test]
+    fn test_make_tool_result_stage2_summary() {
+        let data = json!({
+            "status": "ok",
+            "pagination": {"total": 42, "count": 42, "offset": 0, "limit": 200, "has_more": false},
+            "results": [{"path": "a.rs"}, {"path": "b.rs"}],
+            "total_count": 42,
+            "returned_count": 42
+        });
+        let stage2 = super::make_tool_result_with(data.clone(), true, true);
+        // structuredContent still holds the full data
+        assert_eq!(stage2["structuredContent"], data);
+        // content[text] is a brief summary, not the full JSON blob
+        let text = stage2["content"][0]["text"].as_str().unwrap();
+        assert!(
+            text.contains("42"),
+            "summary should mention match count: {}",
+            text
+        );
+        assert!(
+            text.contains("structuredContent"),
+            "summary should reference structuredContent: {}",
+            text
+        );
+        assert!(
+            text.len() < 120,
+            "summary should be brief (< 120 chars): {}",
+            text
+        );
     }
 
     // REF-204: default (env unset) must keep structuredContent enabled so the

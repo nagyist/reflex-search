@@ -166,6 +166,24 @@ ARMS = {
         "append_system_prompt": None,
         "mcp_env": {"REFLEX_MCP_STRUCTURED_CONTENT": "0"},
     },
+    # -----------------------------------------------------------------------
+    # REF-196 Stage 2: brief summary in content[text] + full data in structuredContent.
+    #
+    # B_sc2 is B_sc with REFLEX_MCP_SC_STAGE2=1: content[text] carries a short
+    # human-readable summary (e.g. "Found 42 matches in 3 files — see structuredContent")
+    # while structuredContent holds the full native JSON object.  This eliminates the
+    # Stage 1 double-payload cost (full JSON in BOTH fields).  B_sc2 / B_nosc is the
+    # headline efficiency comparison: same data, same model, but ~1x payload instead of ~2x.
+    # -----------------------------------------------------------------------
+    "B_sc2": {
+        "description": "structuredContent Stage 2: brief summary in content[text], full data in structuredContent (REF-196 Stage 2)",
+        "mcp_command": "TARGET_RELEASE_RFX",
+        "extra_flags": ["--strict-mcp-config", "--dangerously-skip-permissions"],
+        "disallowed_tools": [],
+        "allowed_tools": BUILTIN_TOOLS_MCP_ARMS + REFLEX_MCP_TOOLS,
+        "append_system_prompt": None,
+        "mcp_env": {"REFLEX_MCP_SC_STAGE2": "1"},
+    },
 }
 
 

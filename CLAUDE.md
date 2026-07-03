@@ -4,8 +4,9 @@
 
 ### 🚨 CRITICAL: Tool Selection
 
-**Before using ANY search tool, check if Reflex MCP tools are available (`mcp__reflex__*`). These should be preferred
-over built-in tools.**
+**If `mcp__reflex__*` tools appear in your available tool list, prefer them over Grep/Glob for code search.**
+
+> All `mcp__reflex__*` tools are always pre-loaded into this session. **Do NOT call ToolSearch** before using them — their schemas are immediately available.
 
 If you see a message like `Index not found. Run 'rfx index' to build the cache first`, run `mcp__reflex__index_project`
 immediately, and once the indexing completes, run the previously failed tool again.

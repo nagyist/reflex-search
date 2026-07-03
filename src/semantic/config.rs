@@ -25,6 +25,71 @@ fn user_home_dir() -> Option<PathBuf> {
     dirs::home_dir()
 }
 
+/// MCP server configuration (read from `~/.reflex/config.toml`, `[mcp]` section)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpConfig {
+    /// Include structural analysis tools in the MCP tool list.
+    /// Gated tools: find_circular, find_islands, find_unused, analyze_summary, get_transitive_deps.
+    /// Default: true (no change to existing behaviour).
+    #[serde(default = "default_structural_tools")]
+    pub enable_structural_tools: bool,
+}
+
+fn default_structural_tools() -> bool {
+    true
+}
+
+impl Default for McpConfig {
+    fn default() -> Self {
+        Self {
+            enable_structural_tools: true,
+        }
+    }
+}
+
+/// Load MCP config from `~/.reflex/config.toml` (`[mcp]` section).
+/// Falls back to defaults if the file or section is absent.
+pub fn load_mcp_config() -> McpConfig {
+    let home = match user_home_dir() {
+        Some(h) => h,
+        None => return McpConfig::default(),
+    };
+
+    let config_path = home.join(".reflex").join("config.toml");
+    if !config_path.exists() {
+        return McpConfig::default();
+    }
+
+    let config_str = match std::fs::read_to_string(&config_path) {
+        Ok(s) => s,
+        Err(_) => return McpConfig::default(),
+    };
+
+    let toml_value: toml::Value = match toml::from_str(&config_str) {
+        Ok(v) => v,
+        Err(_) => return McpConfig::default(),
+    };
+
+    // Warn about unknown keys within the [mcp] section
+    let known_mcp_keys = ["enable_structural_tools"];
+    if let Some(toml::Value::Table(mcp_table)) = toml_value.get("mcp") {
+        for key in mcp_table.keys() {
+            if !known_mcp_keys.contains(&key.as_str()) {
+                eprintln!(
+                    "[warn] ~/.reflex/config.toml: unknown key '[mcp].{}' — ignored",
+                    key
+                );
+            }
+        }
+    }
+
+    if let Some(mcp_table) = toml_value.get("mcp") {
+        mcp_table.clone().try_into().unwrap_or_default()
+    } else {
+        McpConfig::default()
+    }
+}
+
 /// Semantic query configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SemanticConfig {
@@ -193,7 +258,14 @@ pub fn load_config(_cache_dir: &Path) -> Result<SemanticConfig> {
         toml::from_str(&config_str).context("Failed to parse ~/.reflex/config.toml")?;
 
     // REF-90: Warn about unknown top-level sections
-    let known_sections = ["semantic", "credentials", "index", "search", "performance"];
+    let known_sections = [
+        "semantic",
+        "credentials",
+        "index",
+        "search",
+        "performance",
+        "mcp",
+    ];
     if let Some(table) = toml_value.as_table() {
         for key in table.keys() {
             if !known_sections.contains(&key.as_str()) {

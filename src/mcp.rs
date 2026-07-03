@@ -12,12 +12,54 @@ use std::path::PathBuf;
 use crate::cache::CacheManager;
 use crate::dependency::DependencyIndex;
 use crate::indexer::Indexer;
+use crate::line_filter;
 use crate::models::{IndexConfig, IndexStatus, Language, SymbolKind};
 use crate::query::{QueryEngine, QueryFilter};
+use crate::semantic::config::load_mcp_config;
 
 /// Default preview truncation length for MCP responses (characters).
 /// Raised from 100 so typical Rust/TS/Python function signatures fit without truncation.
 const DEFAULT_MCP_PREVIEW_LENGTH: usize = 180;
+
+/// Default page size for MCP list results when the caller does not specify a
+/// `limit`. Raised from 50 → 200 (REF-191).
+///
+/// Rationale: the efficacy benchmark's residual gap was **turn count** — Reflex
+/// reached parity only when it answered in the same number of turns as `grep`.
+/// `grep -rn` returns every occurrence in one shot; a 50-result default forces
+/// an agent doing a find-all task (e.g. 122 occurrences of `extract_symbols`)
+/// to paginate, spending an extra MCP call for the same answer. 200 covers the
+/// overwhelming majority of find-all result sets in a single "decisive" call
+/// while still bounding token cost (hard cap remains 500 via the `min(500)`
+/// clamp on explicit limits). Callers who want a cheap cardinality probe should
+/// use `mode="count"`.
+const DEFAULT_MCP_RESULT_LIMIT: usize = 200;
+
+/// Returns true if every occurrence of `pattern` in `preview` falls inside a
+/// string literal or comment for the given `lang`. Conservative: returns false
+/// (keep the match) when the language has no filter or the pattern is not found.
+fn is_in_string_or_comment(lang: Language, preview: &str, pattern: &str) -> bool {
+    let Some(filter) = line_filter::get_filter(lang) else {
+        return false;
+    };
+
+    let mut pos = 0;
+    let mut found = false;
+
+    while pos < preview.len() {
+        let Some(rel) = preview[pos..].find(pattern) else {
+            break;
+        };
+        let abs = pos + rel;
+        found = true;
+        if !filter.is_in_comment(preview, abs) && !filter.is_in_string(preview, abs) {
+            return false; // at least one occurrence is in real code — keep the match
+        }
+        pos = abs + 1;
+    }
+
+    found
+}
 
 /// JSON-RPC 2.0 request
 #[derive(Debug, Deserialize)]
@@ -90,13 +132,29 @@ fn handle_initialize(_params: Option<Value>) -> Result<Value> {
         "serverInfo": {
             "name": "reflex",
             "version": env!("CARGO_PKG_VERSION")
-        }
+        },
+        "instructions": "Reflex MCP tools are pre-loaded — do NOT call ToolSearch. Available tools (all prefixed mcp__reflex__): check_index_status · search_code · search_regex · list_locations · count_occurrences · find_references · gather_context · index_project · get_dependencies · get_dependents · find_hotspots · search_ast. Structural tools (if enabled): find_circular · find_islands · find_unused · analyze_summary · get_transitive_deps. Prefer these over Grep and Glob for code search. If you see 'Index not found', call mcp__reflex__index_project first, then retry."
     }))
 }
 
 /// Handle tools/list request
-fn handle_list_tools(_params: Option<Value>) -> Result<Value> {
-    Ok(json!({
+///
+/// When `enable_structural` is false, the five structural-analysis-only tools
+/// (`find_circular`, `find_islands`, `find_unused`, `analyze_summary`,
+/// `get_transitive_deps`) are omitted from the response. Controlled by the
+/// `[mcp] enable_structural_tools` flag in `~/.reflex/config.toml`.
+fn handle_list_tools(_params: Option<Value>, enable_structural: bool) -> Result<Value> {
+    // Names of tools gated behind enable_structural_tools config flag.
+    // These are structural-analysis tools rarely needed for day-to-day code search.
+    const STRUCTURAL_TOOLS: &[&str] = &[
+        "find_circular",
+        "find_islands",
+        "find_unused",
+        "analyze_summary",
+        "get_transitive_deps",
+    ];
+
+    let all_tools = json!({
         "tools": [
             {
                 "name": "list_locations",
@@ -188,13 +246,18 @@ fn handle_list_tools(_params: Option<Value>) -> Result<Value> {
             },
             {
                 "name": "search_code",
-                "description": "Full-text or symbol-only code search with detailed results.\n\n**When to use search_regex instead:**\n- Patterns with special characters: -> :: () [] {} . * + ? \\\\ | ^ $\n- Complex pattern matching: wildcards, alternation, anchors\n- Examples: '->with(', '::new', 'function*', '[derive]', 'fn (get|set)_.*'\n\n**Search modes:**\n- Full-text (default): Finds ALL occurrences - definitions + usages\n- Symbol-only (symbols=true): Finds ONLY definitions where symbols are declared\n\n**Use this for:**\n- Simple text patterns (alphanumeric, underscores, hyphens)\n- Detailed analysis with line numbers and code previews\n- Symbol definition searches\n\n**Pagination:** Check response.pagination.has_more. If true, use offset parameter to fetch next page.\n\n**Error Handling:** If you receive an error message containing \"Index not found\" or \"stale\", immediately call the index_project tool, wait for it to complete, then retry this operation.",
+                "description": "Comprehensive full-codebase search — equivalent to `grep -rn`. Returns ALL occurrences across every indexed file in a single call. Do NOT chain multiple search_code calls for the same pattern — one call is already exhaustive. Use mode=\"count\" to get just the match count before deciding whether to paginate.\n\n**Search modes:**\n- Full-text (default): Finds ALL occurrences — definitions + usages\n- Symbol-only (symbols=true): Finds ONLY definitions where symbols are declared\n\n**When to use search_regex instead:**\n- Patterns with special characters: -> :: () [] {} . * + ? \\\\ | ^ $\n- Complex pattern matching: wildcards, alternation, anchors\n- Examples: '->with(', '::new', 'function*', '[derive]', 'fn (get|set)_.*'\n\n**Use this for:**\n- Simple text patterns (alphanumeric, underscores, hyphens)\n- Detailed analysis with line numbers and code previews\n- Symbol definition searches\n\n**Count mode:** Pass mode=\"count\" to get {\"count\": N, \"pattern\": \"...\"} with no match bodies. Faster than list mode — use this to check cardinality before paginating.\n\n**Pagination:** Check response.pagination.has_more. If true, use offset parameter to fetch next page.\n\n**Error Handling:** If you receive an error message containing \"Index not found\" or \"stale\", immediately call the index_project tool, wait for it to complete, then retry this operation.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "pattern": {
                             "type": "string",
                             "description": "Search pattern (text to find)"
+                        },
+                        "mode": {
+                            "type": "string",
+                            "enum": ["list", "count"],
+                            "description": "Response mode: \"list\" (default) returns full match results; \"count\" returns only {count, pattern} — faster, skips match body serialization."
                         },
                         "lang": {
                             "type": "string",
@@ -218,7 +281,7 @@ fn handle_list_tools(_params: Option<Value>) -> Result<Value> {
                         },
                         "limit": {
                             "type": "integer",
-                            "description": "Maximum results per page (default: 100). IMPORTANT: If response.pagination.has_more is true, you MUST fetch more pages using offset parameter."
+                            "description": "Maximum results per page (default: 200, max: 500). The 200-result default covers most find-all tasks in a single call. IMPORTANT: If response.has_more is true, you MUST fetch more pages using offset parameter."
                         },
                         "offset": {
                             "type": "integer",
@@ -260,13 +323,18 @@ fn handle_list_tools(_params: Option<Value>) -> Result<Value> {
             },
             {
                 "name": "search_regex",
-                "description": "Regex-based code search for complex pattern matching (e.g., 'fn (get|set)_\\\\w+').\n\n**Use for:**\n- Patterns with special characters: -> :: () [] {} . * + ? \\\\ | ^ $\n- Pattern matching: wildcards (.*), alternation (a|b), anchors (^$)\n- Complex searches: case-insensitive variants, word boundaries\n\n**Common examples:**\n- Method calls: '->with\\\\(', '->map\\\\(', '::new\\\\('\n- Operators: '->', '::', '||', '&&'\n- Functions: 'fn (get|set)_\\\\\\\\w+' (getter/setter functions)\n- Attributes: '\\\\\\\\[(derive|test)\\\\\\\\]' (Rust attributes)\n\n**Escaping rules:**\n- Must escape: ( ) [ ] { } . * + ? \\\\ | ^ $\n- No escaping needed: -> :: - _ / = < >\n- Use double backslash in JSON: \\\\\\\\( \\\\\\\\) \\\\\\\\[ \\\\\\\\]\n\n**Error Handling:** If you receive an error message containing \"Index not found\" or \"stale\", immediately call the index_project tool, wait for it to complete, then retry this operation.\n\n**Don't use for:**\n- Simple text searches (use search_code instead - faster)\n- Symbol definitions (use search_code with symbols=true instead)",
+                "description": "Regex-based code search for complex pattern matching (e.g., 'fn (get|set)_\\\\w+').\n\n**Use for:**\n- Patterns with special characters: -> :: () [] {} . * + ? \\\\ | ^ $\n- Pattern matching: wildcards (.*), alternation (a|b), anchors (^$)\n- Complex searches: case-insensitive variants, word boundaries\n\n**Common examples:**\n- Method calls: '->with\\\\(', '->map\\\\(', '::new\\\\('\n- Operators: '->', '::', '||', '&&'\n- Functions: 'fn (get|set)_\\\\\\\\w+' (getter/setter functions)\n- Attributes: '\\\\\\\\[(derive|test)\\\\\\\\]' (Rust attributes)\n\n**Escaping rules:**\n- Must escape: ( ) [ ] { } . * + ? \\\\ | ^ $\n- No escaping needed: -> :: - _ / = < >\n- Use double backslash in JSON: \\\\\\\\( \\\\\\\\) \\\\\\\\[ \\\\\\\\]\n\n**Count mode:** Pass mode=\"count\" to get {\"count\": N, \"pattern\": \"...\"} with no match bodies — faster than list mode.\n\n**Error Handling:** If you receive an error message containing \"Index not found\" or \"stale\", immediately call the index_project tool, wait for it to complete, then retry this operation.\n\n**Don't use for:**\n- Simple text searches (use search_code instead - faster)\n- Symbol definitions (use search_code with symbols=true instead)",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "pattern": {
                             "type": "string",
                             "description": "Regex pattern"
+                        },
+                        "mode": {
+                            "type": "string",
+                            "enum": ["list", "count"],
+                            "description": "Response mode: \"list\" (default) returns full match results; \"count\" returns only {count, pattern} — faster, skips match body serialization."
                         },
                         "lang": {
                             "type": "string",
@@ -278,7 +346,7 @@ fn handle_list_tools(_params: Option<Value>) -> Result<Value> {
                         },
                         "limit": {
                             "type": "integer",
-                            "description": "Maximum number of results (use with offset for pagination)"
+                            "description": "Maximum number of results (default: 200, max: 500). Use with offset for pagination."
                         },
                         "offset": {
                             "type": "integer",
@@ -428,7 +496,7 @@ fn handle_list_tools(_params: Option<Value>) -> Result<Value> {
             },
             {
                 "name": "find_hotspots",
-                "description": "Find the most-imported files in the codebase (dependency hotspots).\n\n**Purpose:** Identify files that many other files depend on.\n\n**Pagination:** Default limit of 200 results per page. Check response.pagination.has_more to fetch more pages.\n\n**Sorting:** Default order is descending (most imports first). Use sort parameter to change.\n\n**Returns:** Object with pagination metadata and array of {path, import_count} objects sorted by import count.\n\n**Use this when:**\n- Finding critical files\n- Identifying potential bottlenecks\n- Understanding architecture\n- Planning refactoring priorities\n\n**IMPORTANT:** Only counts **static imports** (string literals). Dynamic imports are filtered. See CLAUDE.md section \"Dependency/Import Extraction\" for details.\n\n**Example output:** {\"pagination\": {...}, \"results\": [{\"path\": \"src/models.rs\", \"import_count\": 27}]}",
+                "description": "Find the most-imported files in the codebase (dependency hotspots). This is the definitive tool for 'which file is imported by the most other files' — Reflex answers this in one call from its pre-built dependency index, which grep cannot do without scanning every file.\n\n**Purpose:** Identify files that many other files depend on — critical path analysis, refactoring impact estimation, and architecture review.\n\n**Pagination:** Default limit of 200 results per page. Check response.pagination.has_more to fetch more pages.\n\n**Sorting:** Default order is descending (most imports first). Use sort parameter to change.\n\n**Returns:** Object with pagination metadata and array of {path, import_count} objects sorted by import count.\n\n**Use this when:**\n- Finding critical files (\"what does every module depend on?\")\n- Identifying potential bottlenecks before refactoring\n- Understanding module boundaries and coupling\n- Planning refactoring priorities by blast radius\n\n**IMPORTANT:** Only counts **static imports** (string literals). Dynamic imports are filtered. See CLAUDE.md section \"Dependency/Import Extraction\" for details.\n\n**Example output:** {\"pagination\": {...}, \"results\": [{\"path\": \"src/models.rs\", \"import_count\": 27}]}",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -533,13 +601,18 @@ fn handle_list_tools(_params: Option<Value>) -> Result<Value> {
             },
             {
                 "name": "find_references",
-                "description": "Find a symbol's definition AND all usage sites in a single call.\n\n**Purpose:** Eliminates the two-step pattern of search_code(symbols=true) + search_code(). Returns both the definition and all usages atomically.\n\n**Returns:** {definition, references, total_references, pagination, status}\n\n**Use this when:**\n- \"Find all callers of X\" — the most common agent refactoring pattern\n- Code review: understand impact before changing a function or class\n- Rename planning: see every site that needs updating\n- Dead code detection: confirm nothing calls a function before removing it\n\n**definition:** First matching symbol definition {path, line, kind, symbol, span, preview}, or null if no symbol definition exists for the pattern.\n\n**references:** Flat array of {path, line, preview} — all textual occurrences including the definition site itself.\n\n**Pagination applies to references only.** Use limit and offset. Check pagination.has_more for more pages.\n\n**Error Handling:** If you receive an error message containing \"Index not found\" or \"stale\", immediately call the index_project tool, wait for it to complete, then retry this operation.",
+                "description": "Find ALL code locations that reference a symbol or pattern in a single call — do NOT chain with search_code for the same pattern; this already covers the full codebase.\n\n**Purpose:** Eliminates the two-step pattern of search_code(symbols=true) + search_code(). Returns both the definition and all usages atomically in one call. Results are complete — no need to follow up with additional searches.\n\n**Filtering:** By default, matches inside string literals and comments are excluded (e.g., test fixture strings, doc comments). Pass `include_strings: true` to restore all occurrences.\n\n**Returns:** {definition, references, total_references, pagination, status}\n\n**Use this when:**\n- \"Find all callers of X\" — the most common agent refactoring pattern\n- Code review: understand impact before changing a function or class\n- Rename planning: see every site that needs updating\n- Dead code detection: confirm nothing calls a function before removing it\n\n**definition:** First matching symbol definition {path, line, kind, symbol, span, preview}, or null if no symbol definition exists for the pattern.\n\n**references:** Flat array of {path, line, preview} — all textual occurrences including the definition site itself.\n\n**Pagination applies to references only.** Use limit and offset. Check pagination.has_more for more pages.\n\n**Error Handling:** If you receive an error message containing \"Index not found\" or \"stale\", immediately call the index_project tool, wait for it to complete, then retry this operation.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "pattern": {
                             "type": "string",
                             "description": "Symbol name or text pattern to find references for (e.g., 'CacheManager', 'extract_symbols')"
+                        },
+                        "mode": {
+                            "type": "string",
+                            "enum": ["list", "count"],
+                            "description": "Response mode: \"list\" (default) returns full results with definition + references; \"count\" returns only {count, pattern} — faster, skips match body serialization."
                         },
                         "kind": {
                             "type": "string",
@@ -561,7 +634,7 @@ fn handle_list_tools(_params: Option<Value>) -> Result<Value> {
                         },
                         "limit": {
                             "type": "integer",
-                            "description": "Max references per page (default: 100). Pagination applies to references only."
+                            "description": "Max references per page (default: 200, max: 500). The 200-result default covers most find-all tasks in a single call. Pagination applies to references only."
                         },
                         "offset": {
                             "type": "integer",
@@ -570,6 +643,10 @@ fn handle_list_tools(_params: Option<Value>) -> Result<Value> {
                         "force": {
                             "type": "boolean",
                             "description": "Force execution of potentially expensive queries (bypasses broad query detection)"
+                        },
+                        "include_strings": {
+                            "type": "boolean",
+                            "description": "Include matches inside string literals and comments (default: false). By default these are excluded to focus on real call sites."
                         }
                     },
                     "required": ["pattern"]
@@ -629,7 +706,21 @@ fn handle_list_tools(_params: Option<Value>) -> Result<Value> {
                 }
             }
         ]
-    }))
+    });
+
+    if enable_structural {
+        return Ok(all_tools);
+    }
+
+    // Filter out structural-analysis tools when disabled in config
+    let tools: Vec<Value> = all_tools["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|t| !STRUCTURAL_TOOLS.contains(&t["name"].as_str().unwrap_or("")))
+        .cloned()
+        .collect();
+    Ok(json!({ "tools": tools }))
 }
 
 /// Handle tools/call request
@@ -865,15 +956,51 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
 
             // Smart limit handling:
             // 1. If --paths is set and user didn't specify limit: no limit (None)
-            // 2. If user specified limit: use that value
-            // 3. Otherwise: use default limit of 100
+            // 2. If user specified limit: use that value, capped at 500
+            // 3. Otherwise: use the agent-oriented default (REF-191) so find-all
+            //    tasks come back in one call instead of paginating.
             let final_limit = if paths_only && limit.is_none() {
                 None // --paths without explicit limit means no limit
             } else if let Some(user_limit) = limit {
-                Some(user_limit) // Use user-specified limit
+                Some(user_limit.min(500)) // Use user-specified limit, capped at 500
             } else {
-                Some(100) // Default: limit to 100 results for token efficiency
+                Some(DEFAULT_MCP_RESULT_LIMIT)
             };
+
+            let mode = arguments["mode"].as_str().unwrap_or("list");
+
+            // Count mode: run query but return only the total match count.
+            // Skips preview truncation and full result serialization for speed.
+            if mode == "count" {
+                let count_filter = QueryFilter {
+                    language,
+                    kind: parsed_kind,
+                    use_ast: false,
+                    use_regex: false,
+                    limit: None, // count everything
+                    symbols_mode,
+                    expand: false,
+                    file_pattern: file,
+                    exact: exact.unwrap_or(false),
+                    use_contains: false,
+                    timeout_secs: 30,
+                    glob_patterns,
+                    exclude_patterns,
+                    paths_only: false,
+                    offset: None,
+                    force,
+                    suppress_output: true,
+                    include_dependencies: false,
+                    ..Default::default()
+                };
+                let cache = CacheManager::new(".");
+                let engine = QueryEngine::new(cache);
+                let response = engine.search_with_metadata(&pattern, count_filter)?;
+                let result = json!({"count": response.pagination.total, "pattern": pattern});
+                return Ok(
+                    json!({"content": [{"type": "text", "text": serde_json::to_string(&result)?}]}),
+                );
+            }
 
             let filter = QueryFilter {
                 language,
@@ -933,10 +1060,21 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 });
             }
 
+            // Extract pagination scalars before consuming response (REF-185)
+            let has_more = response.pagination.has_more;
+            let total_count = response.pagination.total;
+
+            let mut response_val = serde_json::to_value(response)?;
+            if let serde_json::Value::Object(ref mut map) = response_val {
+                map.insert("has_more".to_string(), json!(has_more));
+                map.insert("total_count".to_string(), json!(total_count));
+                map.insert("returned_count".to_string(), json!(result_count));
+            }
+
             Ok(json!({
                 "content": [{
                     "type": "text",
-                    "text": serde_json::to_string(&response)?
+                    "text": serde_json::to_string(&response_val)?
                 }]
             }))
         }
@@ -976,10 +1114,44 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
             let final_limit = if paths_only && limit.is_none() {
                 None // --paths without explicit limit means no limit
             } else if let Some(user_limit) = limit {
-                Some(user_limit) // Use user-specified limit
+                Some(user_limit.min(500)) // Use user-specified limit, capped at 500
             } else {
-                Some(100) // Default: limit to 100 results for token efficiency
+                Some(DEFAULT_MCP_RESULT_LIMIT) // REF-191: one-call default
             };
+
+            let mode = arguments["mode"].as_str().unwrap_or("list");
+
+            // Count mode: return only the total match count, no match bodies.
+            if mode == "count" {
+                let count_filter = QueryFilter {
+                    language,
+                    kind: None,
+                    use_ast: false,
+                    use_regex: true,
+                    limit: None, // count everything
+                    symbols_mode: false,
+                    expand: false,
+                    file_pattern: file,
+                    exact: false,
+                    use_contains: false,
+                    timeout_secs: 30,
+                    glob_patterns,
+                    exclude_patterns,
+                    paths_only: false,
+                    offset: None,
+                    force,
+                    suppress_output: true,
+                    include_dependencies: false,
+                    ..Default::default()
+                };
+                let cache = CacheManager::new(".");
+                let engine = QueryEngine::new(cache);
+                let response = engine.search_with_metadata(&pattern, count_filter)?;
+                let result = json!({"count": response.pagination.total, "pattern": pattern});
+                return Ok(
+                    json!({"content": [{"type": "text", "text": serde_json::to_string(&result)?}]}),
+                );
+            }
 
             let filter = QueryFilter {
                 language,
@@ -1032,10 +1204,21 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 false, // exact
             );
 
+            // Extract pagination scalars before consuming response (REF-185)
+            let has_more = response.pagination.has_more;
+            let total_count = response.pagination.total;
+
+            let mut response_val = serde_json::to_value(response)?;
+            if let serde_json::Value::Object(ref mut map) = response_val {
+                map.insert("has_more".to_string(), json!(has_more));
+                map.insert("total_count".to_string(), json!(total_count));
+                map.insert("returned_count".to_string(), json!(result_count));
+            }
+
             Ok(json!({
                 "content": [{
                     "type": "text",
-                    "text": serde_json::to_string(&response)?
+                    "text": serde_json::to_string(&response_val)?
                 }]
             }))
         }
@@ -1743,9 +1926,44 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 })
                 .unwrap_or_default();
             let force = arguments["force"].as_bool().unwrap_or(false);
+            let include_strings = arguments["include_strings"].as_bool().unwrap_or(false);
 
             let language = parse_language(lang);
             let parsed_kind = parse_symbol_kind(kind);
+
+            let mode = arguments["mode"].as_str().unwrap_or("list");
+
+            // Count mode: skip the definition lookup and just count textual references.
+            if mode == "count" {
+                let count_filter = QueryFilter {
+                    language,
+                    kind: None,
+                    use_ast: false,
+                    use_regex: false,
+                    limit: None, // count everything
+                    symbols_mode: false,
+                    expand: false,
+                    file_pattern: None,
+                    exact: false,
+                    use_contains: false,
+                    timeout_secs: 30,
+                    glob_patterns,
+                    exclude_patterns,
+                    paths_only: false,
+                    offset: None,
+                    force,
+                    suppress_output: true,
+                    include_dependencies: false,
+                    ..Default::default()
+                };
+                let cache = CacheManager::new(".");
+                let engine = QueryEngine::new(cache);
+                let response = engine.search_with_metadata(&pattern, count_filter)?;
+                let result = json!({"count": response.pagination.total, "pattern": pattern});
+                return Ok(
+                    json!({"content": [{"type": "text", "text": serde_json::to_string(&result)?}]}),
+                );
+            }
 
             // Search 1: Find symbol definition (symbols_mode=true, small cap)
             let def_filter = QueryFilter {
@@ -1800,7 +2018,9 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 kind: None,
                 use_ast: false,
                 use_regex: false,
-                limit: limit.or(Some(100)),
+                // REF-191: default to the one-call page size so "find all callers"
+                // returns the full set instead of paginating at 50.
+                limit: limit.map(|l| l.min(500)).or(Some(DEFAULT_MCP_RESULT_LIMIT)),
                 symbols_mode: false,
                 expand: false,
                 file_pattern: None,
@@ -1819,26 +2039,37 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
 
             let ref_response = engine.search_with_metadata(&pattern, ref_filter)?;
 
-            // Flatten references to compact {path, line, preview} array
+            // Flatten references to compact {path, line, preview} array,
+            // excluding matches inside string literals or comments (unless include_strings).
             let references: Vec<serde_json::Value> = ref_response.results.iter()
                 .flat_map(|fg| {
-                    fg.matches.iter().map(move |m| {
-                        json!({
-                            "path": fg.path,
-                            "line": m.span.start_line,
-                            "preview": crate::cli::truncate_preview(&m.preview, DEFAULT_MCP_PREVIEW_LENGTH)
+                    fg.matches.iter()
+                        .filter(|m| {
+                            include_strings
+                                || !is_in_string_or_comment(fg.language, &m.preview, &pattern)
                         })
-                    })
+                        .map(move |m| {
+                            json!({
+                                "path": fg.path,
+                                "line": m.span.start_line,
+                                "preview": crate::cli::truncate_preview(&m.preview, DEFAULT_MCP_PREVIEW_LENGTH)
+                            })
+                        })
                 })
                 .collect();
 
-            let total_references = ref_response.pagination.total;
+            let total_references = references.len();
+            let has_more = ref_response.pagination.has_more;
+            let returned_count = references.len();
 
             let response = json!({
                 "status": ref_response.status,
                 "definition": definition,
                 "references": references,
                 "total_references": total_references,
+                "total_count": total_references,
+                "returned_count": returned_count,
+                "has_more": has_more,
                 "pagination": ref_response.pagination,
             });
 
@@ -1854,12 +2085,12 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
 }
 
 /// Process a single JSON-RPC request
-fn process_request(request: JsonRpcRequest) -> JsonRpcResponse {
+fn process_request(request: JsonRpcRequest, enable_structural: bool) -> JsonRpcResponse {
     log::debug!("MCP request: method={}", request.method);
 
     let result = match request.method.as_str() {
         "initialize" => handle_initialize(request.params),
-        "tools/list" => handle_list_tools(request.params),
+        "tools/list" => handle_list_tools(request.params, enable_structural),
         "tools/call" => handle_call_tool(request.params),
         _ => Err(anyhow::anyhow!("Unknown method: {}", request.method)),
     };
@@ -1927,7 +2158,18 @@ pub fn run_mcp_server() -> Result<()> {
 
 /// Run the MCP server reading JSON-RPC messages from `reader` and writing
 /// responses to `writer`. Exposed at crate-level for integration tests.
-pub fn run_mcp_server_io<R: BufRead, W: Write>(reader: R, mut writer: W) -> Result<()> {
+pub fn run_mcp_server_io<R: BufRead, W: Write>(reader: R, writer: W) -> Result<()> {
+    let mcp_config = load_mcp_config();
+    run_mcp_server_io_impl(reader, writer, mcp_config.enable_structural_tools)
+}
+
+/// Inner server loop. Accepts `enable_structural` so tests can drive the flag
+/// without touching the filesystem.
+fn run_mcp_server_io_impl<R: BufRead, W: Write>(
+    reader: R,
+    mut writer: W,
+    enable_structural: bool,
+) -> Result<()> {
     log::info!("Starting Reflex MCP server on stdio");
 
     for line in reader.lines() {
@@ -1971,7 +2213,7 @@ pub fn run_mcp_server_io<R: BufRead, W: Write>(reader: R, mut writer: W) -> Resu
         }
 
         // Process request and write response
-        let response = process_request(request);
+        let response = process_request(request, enable_structural);
         let response_json = serde_json::to_string(&response)?;
         writeln!(writer, "{}", response_json)?;
         writer.flush()?;
@@ -1989,9 +2231,13 @@ mod tests {
     use std::io::Cursor;
 
     fn call_server(input: &str) -> String {
+        call_server_with_structural(input, true)
+    }
+
+    fn call_server_with_structural(input: &str, enable_structural: bool) -> String {
         let reader = Cursor::new(input.as_bytes());
         let mut output = Vec::new();
-        run_mcp_server_io(reader, &mut output).unwrap();
+        run_mcp_server_io_impl(reader, &mut output, enable_structural).unwrap();
         String::from_utf8(output).unwrap()
     }
 
@@ -2038,6 +2284,238 @@ mod tests {
         assert!(
             raw.trim().is_empty(),
             "notification must not get a response"
+        );
+    }
+
+    // REF-197: initialize handshake must carry the MCP `instructions` field that
+    // nudges clients to prefer reflex tools (moved out of the per-repo CLAUDE.md).
+    #[test]
+    fn test_initialize_includes_instructions() {
+        let req = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}"#;
+        let raw = call_server(&format!("{}\n", req));
+        let resp = parse_first_response(&raw);
+
+        let instructions = resp["result"]["instructions"]
+            .as_str()
+            .expect("instructions must be a string");
+        assert!(!instructions.is_empty(), "instructions must be non-empty");
+        assert!(
+            instructions.contains("mcp__reflex__"),
+            "instructions must reference the mcp__reflex__ tool prefix"
+        );
+        assert!(
+            instructions.contains("index_project"),
+            "instructions must mention the index_project recovery step"
+        );
+
+        // Pre-existing handshake fields must be unchanged.
+        assert_eq!(resp["result"]["protocolVersion"], "2024-11-05");
+        assert_eq!(resp["result"]["serverInfo"]["name"], "reflex");
+    }
+
+    // REF-200: tool schemas must advertise the correct default limit (200, raised from 50 in REF-191) and max cap (500)
+    #[test]
+    fn test_tool_schema_limit_defaults() {
+        let req = r#"{"jsonrpc":"2.0","id":5,"method":"tools/list","params":null}"#;
+        let raw = call_server(&format!("{}\n", req));
+        let resp = parse_first_response(&raw);
+        let tools = resp["result"]["tools"].as_array().expect("tools array");
+
+        let find_tool = |name: &str| {
+            tools
+                .iter()
+                .find(|t| t["name"] == name)
+                .unwrap_or_else(|| panic!("tool '{}' not found", name))
+        };
+
+        for tool_name in &["search_code", "search_regex", "find_references"] {
+            let tool = find_tool(tool_name);
+            let limit_desc = tool["inputSchema"]["properties"]["limit"]["description"]
+                .as_str()
+                .unwrap_or_else(|| panic!("{}: missing limit description", tool_name));
+            assert!(
+                limit_desc.contains("200"),
+                "{}: limit description should mention default 200, got: {}",
+                tool_name,
+                limit_desc
+            );
+            assert!(
+                limit_desc.contains("500"),
+                "{}: limit description should mention max 500, got: {}",
+                tool_name,
+                limit_desc
+            );
+        }
+    }
+
+    // REF-189: structural tools absent when enable_structural_tools = false
+    #[test]
+    fn test_structural_tools_gated_by_flag() {
+        const STRUCTURAL: &[&str] = &[
+            "find_circular",
+            "find_islands",
+            "find_unused",
+            "analyze_summary",
+            "get_transitive_deps",
+        ];
+        const ALWAYS_ON: &[&str] = &["search_code", "find_hotspots", "get_dependencies"];
+
+        let req = r#"{"jsonrpc":"2.0","id":10,"method":"tools/list","params":null}"#;
+
+        // Default (structural enabled): all 5 structural tools present
+        let raw_on = call_server_with_structural(&format!("{}\n", req), true);
+        let resp_on = parse_first_response(&raw_on);
+        let tools_on = resp_on["result"]["tools"].as_array().expect("tools array");
+        let names_on: Vec<&str> = tools_on.iter().filter_map(|t| t["name"].as_str()).collect();
+        for name in STRUCTURAL {
+            assert!(
+                names_on.contains(name),
+                "structural tool '{}' should appear when flag=true",
+                name
+            );
+        }
+
+        // Disabled: structural tools absent, day-to-day tools still present
+        let raw_off = call_server_with_structural(&format!("{}\n", req), false);
+        let resp_off = parse_first_response(&raw_off);
+        let tools_off = resp_off["result"]["tools"].as_array().expect("tools array");
+        let names_off: Vec<&str> = tools_off
+            .iter()
+            .filter_map(|t| t["name"].as_str())
+            .collect();
+        for name in STRUCTURAL {
+            assert!(
+                !names_off.contains(name),
+                "structural tool '{}' must be absent when flag=false",
+                name
+            );
+        }
+        for name in ALWAYS_ON {
+            assert!(
+                names_off.contains(name),
+                "always-on tool '{}' must remain when flag=false",
+                name
+            );
+        }
+    }
+
+    // REF-186: find_references should filter string/comment matches by default
+    #[test]
+    fn test_is_in_string_or_comment_filters_comment() {
+        // Pattern inside a Rust single-line comment should be filtered
+        let line = "let x = 5; // extract_symbols here";
+        assert!(
+            super::is_in_string_or_comment(crate::models::Language::Rust, line, "extract_symbols"),
+            "pattern in comment should be classified as non-code"
+        );
+    }
+
+    #[test]
+    fn test_is_in_string_or_comment_filters_string_literal() {
+        // Pattern inside a string literal should be filtered
+        let line = r#"let s = "extract_symbols";"#;
+        assert!(
+            super::is_in_string_or_comment(crate::models::Language::Rust, line, "extract_symbols"),
+            "pattern in string literal should be classified as non-code"
+        );
+    }
+
+    #[test]
+    fn test_is_in_string_or_comment_keeps_real_code() {
+        // Pattern in real code should NOT be filtered
+        let line = "fn extract_symbols(source: &str) -> Vec<SearchResult> {";
+        assert!(
+            !super::is_in_string_or_comment(crate::models::Language::Rust, line, "extract_symbols"),
+            "real function name should not be classified as non-code"
+        );
+    }
+
+    #[test]
+    fn test_is_in_string_or_comment_mixed_line_keeps_match() {
+        // When a line has the pattern both in a string AND in real code, the match
+        // should be kept (conservative: real code occurrence wins)
+        let line = r#"let _s = "extract_symbols"; extract_symbols(data);"#;
+        assert!(
+            !super::is_in_string_or_comment(crate::models::Language::Rust, line, "extract_symbols"),
+            "when pattern appears in code on the same line, match should be kept"
+        );
+    }
+
+    #[test]
+    fn test_is_in_string_or_comment_unknown_language_keeps_match() {
+        // Unknown language has no filter — always keep the match (conservative)
+        let line = "extract_symbols in some unknown syntax";
+        assert!(
+            !super::is_in_string_or_comment(
+                crate::models::Language::Unknown,
+                line,
+                "extract_symbols"
+            ),
+            "unknown language should never filter matches"
+        );
+    }
+
+    #[test]
+    fn test_find_references_schema_has_include_strings() {
+        let tools_json =
+            call_server(r#"{"jsonrpc":"2.0","id":1,"method":"tools/list","params":null}"#);
+        let resp = parse_first_response(&tools_json);
+        let tools = resp["result"]["tools"].as_array().expect("tools array");
+        let find_refs = tools
+            .iter()
+            .find(|t| t["name"] == "find_references")
+            .expect("find_references tool");
+        let props = &find_refs["inputSchema"]["properties"];
+        assert!(
+            !props["include_strings"].is_null(),
+            "find_references inputSchema must expose include_strings parameter"
+        );
+    }
+
+    // REF-187: search_code, search_regex, and find_references must expose mode parameter
+    #[test]
+    fn test_count_mode_schema_exposed_on_search_tools() {
+        let raw = call_server(r#"{"jsonrpc":"2.0","id":1,"method":"tools/list","params":null}"#);
+        let resp = parse_first_response(&raw);
+        let tools = resp["result"]["tools"].as_array().expect("tools array");
+
+        for tool_name in &["search_code", "search_regex", "find_references"] {
+            let tool = tools
+                .iter()
+                .find(|t| t["name"] == *tool_name)
+                .unwrap_or_else(|| panic!("tool '{}' not found", tool_name));
+            let props = &tool["inputSchema"]["properties"];
+            assert!(
+                !props["mode"].is_null(),
+                "'{}' inputSchema must expose 'mode' parameter (REF-187)",
+                tool_name
+            );
+            let enum_vals = props["mode"]["enum"]
+                .as_array()
+                .unwrap_or_else(|| panic!("'{}' mode must have enum values", tool_name));
+            let vals: Vec<&str> = enum_vals.iter().filter_map(|v| v.as_str()).collect();
+            assert!(
+                vals.contains(&"count") && vals.contains(&"list"),
+                "'{}' mode enum must contain 'count' and 'list', got {:?}",
+                tool_name,
+                vals
+            );
+        }
+    }
+
+    // REF-187: count mode must return {count, pattern} without match bodies
+    // This test verifies the handler shape via a missing-index path (schema-level only,
+    // since integration tests with a real index live in tests/).
+    #[test]
+    fn test_count_mode_missing_required_param_still_returns_32602() {
+        // Ensure count mode parsing doesn't interfere with required param validation.
+        let req = r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"search_code","arguments":{"mode":"count"}}}"#;
+        let raw = call_server(&format!("{}\n", req));
+        let resp = parse_first_response(&raw);
+        // Missing pattern → must still return InvalidParams (-32602), not a crash
+        assert_eq!(
+            resp["error"]["code"], -32602,
+            "count mode must not bypass required-param validation"
         );
     }
 }

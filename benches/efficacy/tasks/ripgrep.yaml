@@ -1,0 +1,204 @@
+# Efficacy task corpus — BurntSushi/ripgrep.
+# Repo pin: ripgrep @ 4649aa9700619f94cf9c66876e9549d83420e16c (tag 14.1.1; see ../repos.md).
+# Schema: ./SCHEMA.md. Ground truth cross-checked by ripgrep (oracle.py) + an
+# independent second method (per-file -c tally, -l file list, or manual read) —
+# never by Reflex, to avoid circularity. All counts/sha256 emitted by oracle.py.
+#
+# expect_reflex is pre-declared before any trial (no cherry-picking).
+
+tasks:
+  # ── Category 1: locate_definition ───────────────────────────────────────────
+  - id: ripgrep-locate-searcher
+    repo: ripgrep
+    repo_sha: 4649aa9700619f94cf9c66876e9549d83420e16c
+    category: locate_definition
+    expect_reflex: neutral
+    prompt: >-
+      In the ripgrep repository, where is the `Searcher` struct defined? Give the
+      exact file and line.
+    ground_truth:
+      type: location
+      file: crates/searcher/src/searcher/mod.rs
+      line: 577
+      expect_regex: '^pub struct Searcher\b'
+    oracle_notes: >-
+      Cross-checked: (1) `rg -nw 'struct Searcher' crates` → single hit at
+      crates/searcher/src/searcher/mod.rs:577 (unique across repo); (2) read
+      lines 575-579 — line 577 is `pub struct Searcher {` (preceded by
+      `#[derive(Clone, Debug)]`), a definition not a usage; anchored
+      `re.search(r'^pub struct Searcher\b', line)` = True.
+
+  - id: ripgrep-locate-sink
+    repo: ripgrep
+    repo_sha: 4649aa9700619f94cf9c66876e9549d83420e16c
+    category: locate_definition
+    expect_reflex: neutral
+    prompt: >-
+      In the ripgrep repository, where is the `Sink` trait defined? Give the exact
+      file and line.
+    ground_truth:
+      type: location
+      file: crates/searcher/src/sink.rs
+      line: 102
+      expect_regex: '^pub trait Sink\b'
+    oracle_notes: >-
+      Cross-checked: (1) `rg -nw 'trait Sink' crates` → single hit at
+      crates/searcher/src/sink.rs:102 (word-boundary `-w` excludes the distinct
+      `trait SinkError` at sink.rs:18, confirming uniqueness); (2) read lines
+      100-104 — line 102 is `pub trait Sink {`, a definition.
+
+  # ── Category 2: find_all_usages ─────────────────────────────────────────────
+  - id: ripgrep-findall-sinkmatch
+    repo: ripgrep
+    repo_sha: 4649aa9700619f94cf9c66876e9549d83420e16c
+    category: find_all_usages
+    expect_reflex: neutral
+    prompt: >-
+      Find every occurrence of the identifier `SinkMatch` in the ripgrep codebase
+      (the `crates` tree). List each as file:line.
+    ground_truth:
+      type: match_set
+      oracle: { pattern: 'SinkMatch', path: 'crates', flags: ['-w'] }
+      expected_count: 29
+      expected_sha256: 'dd0289cf83989b68f183f1def88a5876533a05039158989bee5395ff5847a485'
+    oracle_notes: >-
+      Cross-checked: (1) oracle.py match_set count=29; (2) `rg -cw 'SinkMatch'
+      crates` per-file tally (sink.rs:11, lib.rs:1, summary.rs:2, core.rs:2,
+      util.rs:4, json.rs:2, testutil.rs:2, standard.rs:5) sums to exactly 29 — no
+      line carries multiple occurrences, so file:line count == occurrence count.
+
+  - id: ripgrep-findall-sinkcontext
+    repo: ripgrep
+    repo_sha: 4649aa9700619f94cf9c66876e9549d83420e16c
+    category: find_all_usages
+    expect_reflex: neutral
+    prompt: >-
+      Find every occurrence of the identifier `SinkContext` in the ripgrep
+      codebase (the `crates` tree). List each as file:line.
+    ground_truth:
+      type: match_set
+      oracle: { pattern: 'SinkContext', path: 'crates', flags: ['-w'] }
+      expected_count: 21
+      expected_sha256: '0badb07ec77ba88be1a101f583dbf058b3b1c5e770fa07cf2099bda3ff751037'
+    oracle_notes: >-
+      Cross-checked: (1) oracle.py match_set count=21; (2) `rg -cw 'SinkContext'
+      crates` per-file tally (json.rs:2, util.rs:4, standard.rs:3, testutil.rs:2,
+      sink.rs:5, lib.rs:1, core.rs:4) sums to exactly 21.
+
+  - id: ripgrep-findall-mmapchoice
+    repo: ripgrep
+    repo_sha: 4649aa9700619f94cf9c66876e9549d83420e16c
+    category: find_all_usages
+    expect_reflex: neutral
+    prompt: >-
+      Find every occurrence of the identifier `MmapChoice` in the ripgrep codebase
+      (the `crates` tree). List each as file:line.
+    ground_truth:
+      type: match_set
+      oracle: { pattern: 'MmapChoice', path: 'crates', flags: ['-w'] }
+      expected_count: 17
+      expected_sha256: '71be0d8ccc13f3d9d4eb95cdbc15cc9529d8f4ddccf56d1ea674a921d2f8c357'
+    oracle_notes: >-
+      Cross-checked: (1) oracle.py match_set count=17; (2) `rg -cw 'MmapChoice'
+      crates` per-file tally (hiargs.rs:3, lib.rs:1, mmap.rs:9, mod.rs:4) sums to
+      exactly 17.
+
+  # ── Category 3: refactor_scope ──────────────────────────────────────────────
+  - id: ripgrep-refactor-lineterminator
+    repo: ripgrep
+    repo_sha: 4649aa9700619f94cf9c66876e9549d83420e16c
+    category: refactor_scope
+    expect_reflex: neutral
+    prompt: >-
+      In the ripgrep repository, if you were renaming the `LineTerminator` type,
+      which files would you need to touch? List every file that references it.
+    ground_truth:
+      type: file_set
+      oracle: { pattern: 'LineTerminator', path: 'crates', flags: ['-w'] }
+      expected_count: 12
+      expected_sha256: 'fd0342ec33433a74cae155c713c76a675e46cb9b8b1f9b896401440710e484e5'
+      expected_files:
+        - crates/core/flags/hiargs.rs
+        - crates/matcher/src/lib.rs
+        - crates/printer/src/json.rs
+        - crates/printer/src/standard.rs
+        - crates/printer/src/util.rs
+        - crates/regex/src/config.rs
+        - crates/regex/src/matcher.rs
+        - crates/regex/src/strip.rs
+        - crates/searcher/src/lines.rs
+        - crates/searcher/src/searcher/mod.rs
+        - crates/searcher/src/sink.rs
+        - crates/searcher/src/testutil.rs
+    oracle_notes: >-
+      Cross-checked: (1) oracle.py file_set (-w) count=12; (2) `rg -lw
+      'LineTerminator' crates` independently returned the same 12 files.
+
+  # ── Category 4: dependency (imports of a file) ──────────────────────────────
+  - id: ripgrep-imports-summary
+    repo: ripgrep
+    repo_sha: 4649aa9700619f94cf9c66876e9549d83420e16c
+    category: dependency_imports
+    expect_reflex: neutral
+    prompt: >-
+      What does the file `crates/printer/src/summary.rs` in the ripgrep repository
+      import? List its top-level `use` statements (file:line each).
+    ground_truth:
+      type: match_set
+      oracle: { pattern: '^use ', path: 'crates/printer/src/summary.rs', flags: [] }
+      expected_count: 3
+      expected_sha256: '914ef267f98d1791fd2c1728ec3208c4eef445ae6423080e95a588924ed31f9a'
+    oracle_notes: >-
+      Cross-checked: (1) oracle.py match_set count=3 (lines 1, 9, 15); (2) read
+      lines 1-20 — the three top-level `use` blocks are the std import (1), the
+      external-crate group grep_matcher/grep_searcher/termcolor (9), and the
+      crate-internal group (15); no doc-comment/string-literal false positives.
+
+  # ── Category 4b: reverse dependency ─────────────────────────────────────────
+  - id: ripgrep-revdep-grep-searcher
+    repo: ripgrep
+    repo_sha: 4649aa9700619f94cf9c66876e9549d83420e16c
+    category: reverse_dependency
+    expect_reflex: win
+    prompt: >-
+      In the ripgrep repository, which files in the `printer` crate depend on the
+      `grep_searcher` crate? List every file that references it.
+    ground_truth:
+      type: file_set
+      oracle: { pattern: 'grep_searcher::', path: 'crates/printer', flags: [] }
+      expected_count: 5
+      expected_sha256: 'd817ad969f478ea075fb189fcafbc6032bdd65a0193c25ee0fb887d379512f3a'
+      expected_files:
+        - crates/printer/src/json.rs
+        - crates/printer/src/lib.rs
+        - crates/printer/src/standard.rs
+        - crates/printer/src/summary.rs
+        - crates/printer/src/util.rs
+    oracle_notes: >-
+      Cross-checked: (1) oracle.py file_set count=5; (2) `rg -l 'grep_searcher::'
+      crates/printer` returned the same 5 files; `rg -n` confirmed real code refs
+      (e.g. lib.rs:31 `grep_searcher::Searcher`), not doc examples. Scoped to the
+      printer crate so every hit is a genuine cross-crate dependency.
+      expect_reflex=win: Reflex's get_dependents targets exactly this vs grep
+      needing careful path patterns to avoid comment/doc noise.
+
+  # ── Category 8: negative / neutral control ──────────────────────────────────
+  - id: ripgrep-negctrl-max-look-ahead
+    repo: ripgrep
+    repo_sha: 4649aa9700619f94cf9c66876e9549d83420e16c
+    category: negative_control
+    expect_reflex: lose
+    prompt: >-
+      In the ripgrep repository, find every occurrence of the literal string
+      `MAX_LOOK_AHEAD` (in the `crates` tree).
+    ground_truth:
+      type: match_set
+      oracle: { pattern: 'MAX_LOOK_AHEAD', path: 'crates', flags: ['-F'] }
+      expected_count: 6
+      expected_sha256: 'e7191099eb8daf1abfef63fd0eb4fe7ccce1f3d531590287992f4ad1a1a7bbc2'
+    oracle_notes: >-
+      Deliberate negative control. Cross-checked: (1) oracle.py match_set (-F
+      literal) count=6; (2) `rg -Fn 'MAX_LOOK_AHEAD' crates` listed all 6 lines —
+      const def at printer/src/lib.rs:87 plus 5 refs in printer/src/util.rs (11,
+      63, 64, 503, 504). Rare literal, tiny result set: index overhead should
+      dominate over a plain scan. expect_reflex=lose.

@@ -68,7 +68,7 @@ fn initialize_round_trip() {
 
     let v: Value = serde_json::from_str(&out[0]).unwrap();
     assert_eq!(v["id"], Value::from(1));
-    assert_eq!(v["result"]["protocolVersion"], "2024-11-05");
+    assert_eq!(v["result"]["protocolVersion"], "2025-11-25");
     assert!(v["result"]["serverInfo"]["name"].is_string());
 }
 

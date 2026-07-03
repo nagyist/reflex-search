@@ -125,7 +125,7 @@ fn parse_symbol_kind(kind: Option<String>) -> Option<SymbolKind> {
 /// Handle initialize request
 fn handle_initialize(_params: Option<Value>) -> Result<Value> {
     Ok(json!({
-        "protocolVersion": "2024-11-05",
+        "protocolVersion": "2025-11-25",
         "capabilities": {
             "tools": {}
         },
@@ -724,6 +724,25 @@ fn handle_list_tools(_params: Option<Value>, enable_structural: bool) -> Result<
 }
 
 /// Handle tools/call request
+/// Build a successful MCP `tools/call` result carrying both the legacy
+/// `content[text]` JSON string (unchanged, fully backwards-compatible) and the
+/// 2025-11-25 `structuredContent` object holding the same data natively.
+///
+/// Stage 1 (REF-202): additive only. `content[text]` remains the full JSON
+/// string so existing clients keep working; clients that don't recognise
+/// `structuredContent` simply ignore it. Only success paths use this — error
+/// results are surfaced through the JSON-RPC error channel in `process_request`,
+/// never as a tool result, so there are no `isError` responses to preserve here.
+fn make_tool_result(data: Value) -> Value {
+    json!({
+        "content": [{
+            "type": "text",
+            "text": serde_json::to_string(&data).unwrap_or_default()
+        }],
+        "structuredContent": data
+    })
+}
+
 fn handle_call_tool(params: Option<Value>) -> Result<Value> {
     let params = params.ok_or_else(|| anyhow::anyhow!("Missing params for tools/call"))?;
 
@@ -811,12 +830,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 "locations": locations
             });
 
-            Ok(json!({
-                "content": [{
-                    "type": "text",
-                    "text": serde_json::to_string(&compact_response)?
-                }]
-            }))
+            Ok(make_tool_result(compact_response))
         }
         "count_occurrences" => {
             // Quick stats tool (minimal token usage)
@@ -891,12 +905,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 "files": unique_files.len()
             });
 
-            Ok(json!({
-                "content": [{
-                    "type": "text",
-                    "text": serde_json::to_string(&stats)?
-                }]
-            }))
+            Ok(make_tool_result(stats))
         }
         "search_code" => {
             let pattern = arguments["pattern"]
@@ -997,9 +1006,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 let engine = QueryEngine::new(cache);
                 let response = engine.search_with_metadata(&pattern, count_filter)?;
                 let result = json!({"count": response.pagination.total, "pattern": pattern});
-                return Ok(
-                    json!({"content": [{"type": "text", "text": serde_json::to_string(&result)?}]}),
-                );
+                return Ok(make_tool_result(result));
             }
 
             let filter = QueryFilter {
@@ -1071,12 +1078,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 map.insert("returned_count".to_string(), json!(result_count));
             }
 
-            Ok(json!({
-                "content": [{
-                    "type": "text",
-                    "text": serde_json::to_string(&response_val)?
-                }]
-            }))
+            Ok(make_tool_result(response_val))
         }
         "search_regex" => {
             let pattern = arguments["pattern"]
@@ -1148,9 +1150,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 let engine = QueryEngine::new(cache);
                 let response = engine.search_with_metadata(&pattern, count_filter)?;
                 let result = json!({"count": response.pagination.total, "pattern": pattern});
-                return Ok(
-                    json!({"content": [{"type": "text", "text": serde_json::to_string(&result)?}]}),
-                );
+                return Ok(make_tool_result(result));
             }
 
             let filter = QueryFilter {
@@ -1215,12 +1215,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 map.insert("returned_count".to_string(), json!(result_count));
             }
 
-            Ok(json!({
-                "content": [{
-                    "type": "text",
-                    "text": serde_json::to_string(&response_val)?
-                }]
-            }))
+            Ok(make_tool_result(response_val))
         }
         "search_ast" => {
             // AST pattern (Tree-sitter S-expression)
@@ -1315,12 +1310,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                     crate::cli::truncate_preview(&result.preview, DEFAULT_MCP_PREVIEW_LENGTH);
             }
 
-            Ok(json!({
-                "content": [{
-                    "type": "text",
-                    "text": serde_json::to_string(&results)?
-                }]
-            }))
+            Ok(make_tool_result(serde_json::to_value(&results)?))
         }
         "index_project" => {
             let force = arguments["force"].as_bool();
@@ -1352,12 +1342,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
             let path = PathBuf::from(".");
             let stats = indexer.index(&path, false)?;
 
-            Ok(json!({
-                "content": [{
-                    "type": "text",
-                    "text": serde_json::to_string(&stats)?
-                }]
-            }))
+            Ok(make_tool_result(serde_json::to_value(&stats)?))
         }
         "get_dependencies" => {
             let path = arguments["path"]
@@ -1375,12 +1360,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
 
             let dependencies = deps_index.get_dependencies_info(file_id)?;
 
-            Ok(json!({
-                "content": [{
-                    "type": "text",
-                    "text": serde_json::to_string(&dependencies)?
-                }]
-            }))
+            Ok(make_tool_result(serde_json::to_value(&dependencies)?))
         }
         "get_dependents" => {
             let path = arguments["path"]
@@ -1405,12 +1385,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 .filter_map(|id| paths.get(id).cloned())
                 .collect();
 
-            Ok(json!({
-                "content": [{
-                    "type": "text",
-                    "text": serde_json::to_string(&path_list)?
-                }]
-            }))
+            Ok(make_tool_result(serde_json::to_value(&path_list)?))
         }
         "get_transitive_deps" => {
             let path = arguments["path"]
@@ -1447,12 +1422,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 })
                 .collect();
 
-            Ok(json!({
-                "content": [{
-                    "type": "text",
-                    "text": serde_json::to_string(&result)?
-                }]
-            }))
+            Ok(make_tool_result(serde_json::to_value(&result)?))
         }
         "find_hotspots" => {
             let limit = arguments["limit"].as_u64().map(|n| n as usize);
@@ -1529,12 +1499,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 "results": results,
             });
 
-            Ok(json!({
-                "content": [{
-                    "type": "text",
-                    "text": serde_json::to_string(&response)?
-                }]
-            }))
+            Ok(make_tool_result(response))
         }
         "find_circular" => {
             let limit = arguments["limit"].as_u64().map(|n| n as usize);
@@ -1606,12 +1571,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 "results": results,
             });
 
-            Ok(json!({
-                "content": [{
-                    "type": "text",
-                    "text": serde_json::to_string(&response)?
-                }]
-            }))
+            Ok(make_tool_result(response))
         }
         "find_unused" => {
             let limit = arguments["limit"].as_u64().map(|n| n as usize);
@@ -1654,12 +1614,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 "results": results,
             });
 
-            Ok(json!({
-                "content": [{
-                    "type": "text",
-                    "text": serde_json::to_string(&response)?
-                }]
-            }))
+            Ok(make_tool_result(response))
         }
         "find_islands" => {
             let limit = arguments["limit"].as_u64().map(|n| n as usize);
@@ -1768,12 +1723,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 "results": results,
             });
 
-            Ok(json!({
-                "content": [{
-                    "type": "text",
-                    "text": serde_json::to_string(&response)?
-                }]
-            }))
+            Ok(make_tool_result(response))
         }
         "analyze_summary" => {
             let min_dependents = arguments["min_dependents"]
@@ -1797,12 +1747,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 "min_dependents": min_dependents,
             });
 
-            Ok(json!({
-                "content": [{
-                    "type": "text",
-                    "text": serde_json::to_string(&summary)?
-                }]
-            }))
+            Ok(make_tool_result(summary))
         }
         "gather_context" => {
             // Parse optional parameters
@@ -1847,11 +1792,17 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 ""
             };
 
+            // gather_context returns human-readable prose, not JSON. Running it
+            // through make_tool_result would JSON-encode (quote + escape) the text
+            // and change content[text]; instead keep content[text] as the raw
+            // string and expose the same prose under structuredContent (REF-202).
+            let context_text = format!("{}{}", context, hint);
             Ok(json!({
                 "content": [{
                     "type": "text",
-                    "text": format!("{}{}", context, hint)
-                }]
+                    "text": context_text.clone()
+                }],
+                "structuredContent": { "context": context_text }
             }))
         }
         "check_index_status" => {
@@ -1862,12 +1813,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                     "status": "missing",
                     "action_required": "rfx index"
                 });
-                return Ok(json!({
-                    "content": [{
-                        "type": "text",
-                        "text": serde_json::to_string(&result)?
-                    }]
-                }));
+                return Ok(make_tool_result(result));
             }
 
             let engine = QueryEngine::new(cache);
@@ -1892,12 +1838,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 json!({ "status": status_str })
             };
 
-            Ok(json!({
-                "content": [{
-                    "type": "text",
-                    "text": serde_json::to_string(&result)?
-                }]
-            }))
+            Ok(make_tool_result(result))
         }
         "find_references" => {
             let pattern = arguments["pattern"]
@@ -1960,9 +1901,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 let engine = QueryEngine::new(cache);
                 let response = engine.search_with_metadata(&pattern, count_filter)?;
                 let result = json!({"count": response.pagination.total, "pattern": pattern});
-                return Ok(
-                    json!({"content": [{"type": "text", "text": serde_json::to_string(&result)?}]}),
-                );
+                return Ok(make_tool_result(result));
             }
 
             // Search 1: Find symbol definition (symbols_mode=true, small cap)
@@ -2073,12 +2012,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 "pagination": ref_response.pagination,
             });
 
-            Ok(json!({
-                "content": [{
-                    "type": "text",
-                    "text": serde_json::to_string(&response)?
-                }]
-            }))
+            Ok(make_tool_result(response))
         }
         _ => Err(anyhow::anyhow!("Unknown tool: {}", name)),
     }
@@ -2309,8 +2243,29 @@ mod tests {
         );
 
         // Pre-existing handshake fields must be unchanged.
-        assert_eq!(resp["result"]["protocolVersion"], "2024-11-05");
+        assert_eq!(resp["result"]["protocolVersion"], "2025-11-25");
         assert_eq!(resp["result"]["serverInfo"]["name"], "reflex");
+    }
+
+    // REF-202: make_tool_result must emit BOTH the legacy content[text] JSON
+    // string (unchanged) and the 2025-11-25 structuredContent object (same data).
+    #[test]
+    fn test_make_tool_result_dual_shape() {
+        let data = json!({"status": "fresh", "count": 3});
+        let result = super::make_tool_result(data.clone());
+
+        // structuredContent carries the native object verbatim.
+        assert_eq!(result["structuredContent"], data);
+
+        // content[text] is the same data serialized as a JSON string, so existing
+        // clients that only read content[text] keep getting identical output.
+        assert_eq!(result["content"][0]["type"], "text");
+        let text = result["content"][0]["text"]
+            .as_str()
+            .expect("content[0].text must be a string");
+        let roundtrip: serde_json::Value =
+            serde_json::from_str(text).expect("content[text] must be valid JSON");
+        assert_eq!(roundtrip, data);
     }
 
     // REF-200: tool schemas must advertise the correct default limit (200, raised from 50 in REF-191) and max cap (500)

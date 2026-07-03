@@ -137,275 +137,6 @@ fn handle_initialize(_params: Option<Value>) -> Result<Value> {
     }))
 }
 
-// ---------------------------------------------------------------------------
-// outputSchema builders (REF-203 / REF-196 Phase 3)
-//
-// Each tool's `outputSchema` declares the JSON Schema of the `structuredContent`
-// object produced by `make_tool_result` in the corresponding `handle_call_tool`
-// arm. Declaring it lets MCP clients validate responses and gives the LLM
-// type awareness of the shape it will receive.
-//
-// These are composed from small reusable pieces so the declared schema tracks
-// the real serialization of `QueryResponse` (see `src/models.rs`). A drift test
-// (`tests/mcp_output_schema.rs`) validates a live `search_code` response against
-// `schema_search_output()` to catch divergence.
-//
-// The schemas are intentionally permissive on additional properties
-// (forward-compatible: new optional fields must not break existing clients) but
-// strict on `required` — the fields that are ALWAYS present in that response.
-
-/// `{ start_line, end_line }` — the serialized shape of `models::Span`.
-fn schema_span() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "start_line": { "type": "integer" },
-            "end_line": { "type": "integer" }
-        },
-        "required": ["start_line", "end_line"]
-    })
-}
-
-/// One match within a file — serialized `models::MatchResult`.
-/// `kind` and `symbol` are omitted for plain text matches, so only
-/// `span` + `preview` are guaranteed.
-fn schema_match() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "kind": { "type": "string", "description": "Symbol kind; present only for symbol matches" },
-            "symbol": { "type": "string" },
-            "span": schema_span(),
-            "preview": { "type": "string" },
-            "context_before": { "type": "array", "items": { "type": "string" } },
-            "context_after": { "type": "array", "items": { "type": "string" } }
-        },
-        "required": ["span", "preview"]
-    })
-}
-
-/// A file-grouped result — serialized `models::FileGroupedResult`.
-fn schema_file_result() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "path": { "type": "string" },
-            "language": { "type": "string", "description": "Detected language, lowercased (e.g. \"rust\"); \"unknown\" for unrecognized files" },
-            "dependencies": { "type": "array", "items": { "type": "object" } },
-            "matches": { "type": "array", "items": schema_match() }
-        },
-        "required": ["path", "language", "matches"]
-    })
-}
-
-/// Pagination metadata — serialized `models::PaginationInfo`.
-/// `limit` defaults to `DEFAULT_MCP_RESULT_LIMIT` (200) for list-mode MCP calls.
-fn schema_pagination() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "total": { "type": "integer", "description": "Total matches before offset/limit" },
-            "count": { "type": "integer", "description": "Matches returned in this page" },
-            "offset": { "type": "integer" },
-            "limit": { "type": "integer", "default": 200, "description": "Max results per page (MCP default 200)" },
-            "has_more": { "type": "boolean" }
-        },
-        "required": ["total", "count", "offset", "has_more"]
-    })
-}
-
-/// Reduced `count`-mode payload — `{ count, pattern }`. Emitted by
-/// `search_code`, `search_regex`, and `find_references` when `mode="count"`.
-fn schema_count_result() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "count": { "type": "integer" },
-            "pattern": { "type": "string" }
-        },
-        "required": ["count", "pattern"]
-    })
-}
-
-/// List-mode result for `search_code` / `search_regex`: serialized
-/// `QueryResponse` plus the flattened `has_more`/`total_count`/`returned_count`
-/// scalars that `handle_call_tool` inserts.
-fn schema_search_list() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "status": { "type": "string", "enum": ["fresh", "stale"] },
-            "can_trust_results": { "type": "boolean" },
-            "warning": { "type": "object" },
-            "ai_instruction": { "type": "string" },
-            "pagination": schema_pagination(),
-            "results": { "type": "array", "items": schema_file_result() },
-            "total_count": { "type": "integer" },
-            "returned_count": { "type": "integer" },
-            "has_more": { "type": "boolean" }
-        },
-        "required": ["status", "pagination", "results", "total_count", "returned_count", "has_more"]
-    })
-}
-
-/// Columnar list-mode result for `search_code` / `search_regex` (REF-209).
-///
-/// The file-grouped `results` array is replaced by a `{ columns, rows }` pair:
-/// each match becomes a positional row aligned to `columns`, so match-field keys
-/// appear once instead of once per match (~41% payload reduction on large
-/// results — see REF-196 analysis). Top-level metadata (`status`, `pagination`,
-/// the flattened `has_more`/`total_count`/`returned_count` scalars) is unchanged.
-fn schema_search_columnar() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "status": { "type": "string", "enum": ["fresh", "stale"] },
-            "can_trust_results": { "type": "boolean" },
-            "warning": { "type": "object" },
-            "ai_instruction": { "type": "string" },
-            "pagination": schema_pagination(),
-            "columns": {
-                "type": "array",
-                "items": { "type": "string" },
-                "description": "Column names for each row. Always begins with path, language, start_line, end_line, preview; kind/symbol/context_before/context_after/dependencies are appended only when at least one match carries them."
-            },
-            "rows": {
-                "type": "array",
-                "items": { "type": "array" },
-                "description": "One array per match; element i corresponds to columns[i]. path/language repeat per row so each row is self-contained."
-            },
-            "total_count": { "type": "integer" },
-            "returned_count": { "type": "integer" },
-            "has_more": { "type": "boolean" }
-        },
-        "required": ["status", "pagination", "columns", "rows", "total_count", "returned_count", "has_more"]
-    })
-}
-
-/// `outputSchema` for `search_code` and `search_regex`. `list` mode returns the
-/// full result set; `count` mode returns `{ count, pattern }`.
-///
-/// The list-mode branch tracks the runtime `REFLEX_MCP_COLUMNAR` toggle (REF-209)
-/// so the declared schema always matches what the server actually emits: the
-/// columnar `{ columns, rows }` shape by default, or the legacy file-grouped
-/// `results` array when columnar output is disabled.
-fn schema_search_output() -> Value {
-    let list = if columnar_enabled() {
-        schema_search_columnar()
-    } else {
-        schema_search_list()
-    };
-    json!({
-        // MCP requires `outputSchema` to be an object-type JSON Schema (the
-        // `structuredContent` payload is always a JSON object). Both `oneOf`
-        // branches are themselves `type: object`, so declaring the root as
-        // `object` is consistent and is REQUIRED: Claude Code's client validates
-        // `outputSchema.type === "object"` and rejects the *entire* tools/list
-        // batch (dropping all tools, server still "connected") if any tool's
-        // root schema is a bare `oneOf` without it (REF-210).
-        "type": "object",
-        "description": "list mode (default) returns full results in columnar {columns, rows} form (REF-209); count mode returns {count, pattern}. Set REFLEX_MCP_COLUMNAR=0 to restore the legacy results[] shape.",
-        "oneOf": [list, schema_count_result()]
-    })
-}
-
-/// `outputSchema` for `find_references`. `list` mode returns the definition plus
-/// flattened references; `count` mode returns `{ count, pattern }`.
-fn schema_find_references_output() -> Value {
-    let list = json!({
-        "type": "object",
-        "properties": {
-            "status": { "type": "string", "enum": ["fresh", "stale"] },
-            "definition": {
-                "type": ["object", "null"],
-                "description": "First matching symbol definition, or null if none exists",
-                "properties": {
-                    "path": { "type": "string" },
-                    "kind": { "type": "string" },
-                    "symbol": { "type": "string" },
-                    "span": schema_span(),
-                    "preview": { "type": "string" }
-                }
-            },
-            "references": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "path": { "type": "string" },
-                        "line": { "type": "integer" },
-                        "preview": { "type": "string" }
-                    },
-                    "required": ["path", "line", "preview"]
-                }
-            },
-            "total_references": { "type": "integer" },
-            "total_count": { "type": "integer" },
-            "returned_count": { "type": "integer" },
-            "has_more": { "type": "boolean" },
-            "pagination": schema_pagination()
-        },
-        "required": ["status", "definition", "references", "total_references", "total_count", "returned_count", "has_more", "pagination"]
-    });
-    json!({
-        // Root must be `type: object` — see the note in `schema_search_output`.
-        // A bare top-level `oneOf` here fails Claude Code's outputSchema
-        // validation and silently drops every Reflex tool (REF-210).
-        "type": "object",
-        "description": "list mode (default) returns definition + references; count mode returns {count, pattern}",
-        "oneOf": [list, schema_count_result()]
-    })
-}
-
-/// `outputSchema` for `gather_context`. Returns human-readable prose wrapped as
-/// `{ context }` (this arm does not go through `make_tool_result`).
-fn schema_gather_context_output() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "context": { "type": "string", "description": "Human-readable project orientation summary" }
-        },
-        "required": ["context"]
-    })
-}
-
-/// `outputSchema` for `list_locations`: `{ status, total_locations, locations[] }`.
-fn schema_list_locations_output() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "status": { "type": "string", "enum": ["fresh", "stale"] },
-            "total_locations": { "type": "integer" },
-            "locations": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "path": { "type": "string" },
-                        "line": { "type": "integer" }
-                    },
-                    "required": ["path", "line"]
-                }
-            }
-        },
-        "required": ["status", "total_locations", "locations"]
-    })
-}
-
-/// `outputSchema` for `count_occurrences`: `{ status, pattern, total, files }`.
-fn schema_count_occurrences_output() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "status": { "type": "string", "enum": ["fresh", "stale"] },
-            "pattern": { "type": "string" },
-            "total": { "type": "integer", "description": "Total occurrences across all files" },
-            "files": { "type": "integer", "description": "Number of distinct files containing the pattern" }
-        },
-        "required": ["status", "pattern", "total", "files"]
-    })
-}
-
 /// Handle tools/list request
 ///
 /// When `enable_structural` is false, the five structural-analysis-only tools
@@ -463,8 +194,7 @@ fn handle_list_tools(_params: Option<Value>, enable_structural: bool) -> Result<
                         }
                     },
                     "required": ["pattern"]
-                },
-                "outputSchema": schema_list_locations_output()
+                }
             },
             {
                 "name": "count_occurrences",
@@ -512,8 +242,7 @@ fn handle_list_tools(_params: Option<Value>, enable_structural: bool) -> Result<
                         }
                     },
                     "required": ["pattern"]
-                },
-                "outputSchema": schema_count_occurrences_output()
+                }
             },
             {
                 "name": "search_code",
@@ -590,8 +319,7 @@ fn handle_list_tools(_params: Option<Value>, enable_structural: bool) -> Result<
                         }
                     },
                     "required": ["pattern"]
-                },
-                "outputSchema": schema_search_output()
+                }
             },
             {
                 "name": "search_regex",
@@ -648,8 +376,7 @@ fn handle_list_tools(_params: Option<Value>, enable_structural: bool) -> Result<
                         }
                     },
                     "required": ["pattern"]
-                },
-                "outputSchema": schema_search_output()
+                }
             },
             {
                 "name": "search_ast",
@@ -923,8 +650,7 @@ fn handle_list_tools(_params: Option<Value>, enable_structural: bool) -> Result<
                         }
                     },
                     "required": ["pattern"]
-                },
-                "outputSchema": schema_find_references_output()
+                }
             },
             {
                 "name": "gather_context",
@@ -969,8 +695,7 @@ fn handle_list_tools(_params: Option<Value>, enable_structural: bool) -> Result<
                             "description": "Focus on specific directory path"
                         }
                     }
-                },
-                "outputSchema": schema_gather_context_output()
+                }
             },
             {
                 "name": "check_index_status",
@@ -999,63 +724,32 @@ fn handle_list_tools(_params: Option<Value>, enable_structural: bool) -> Result<
 }
 
 /// Handle tools/call request
-/// Build a successful MCP `tools/call` result carrying both the legacy
-/// `content[text]` JSON string (unchanged, fully backwards-compatible) and the
-/// 2025-11-25 `structuredContent` object holding the same data natively.
+/// Build a successful MCP `tools/call` result.
 ///
-/// Stage 1 (REF-202): additive only. `content[text]` remains the full JSON
-/// string so existing clients keep working; clients that don't recognise
-/// `structuredContent` simply ignore it. Only success paths use this — error
-/// results are surfaced through the JSON-RPC error channel in `process_request`,
-/// never as a tool result, so there are no `isError` responses to preserve here.
+/// REF-215: Reflex emits only the spec-guaranteed `content[text]` baseline — the
+/// result data serialized as a JSON string. The spec-optional `structuredContent`
+/// field (REF-202) was dropped per the REF-196 board decision: every conforming
+/// MCP client must handle `content[text]`, it is what reaches the model in
+/// Reflex's primary Claude Code use case, and emitting a single field removes any
+/// chance of a client consuming both and double-counting tokens. The columnar
+/// `{columns, rows}` shape (REF-209) is independent and still lives inside this
+/// text payload.
+///
+/// Only success paths use this — error results are surfaced through the JSON-RPC
+/// error channel in `process_request`, never as a tool result, so there are no
+/// `isError` responses to preserve here.
 fn make_tool_result(data: Value) -> Value {
-    make_tool_result_with(data, structured_content_enabled(), sc_stage2_enabled())
-}
-
-/// REF-204: A/B efficacy switch for the additive `structuredContent` field.
-///
-/// Returns `false` only when `REFLEX_MCP_STRUCTURED_CONTENT` is explicitly set to
-/// a falsey value (`0`/`false`/`off`/`no`, case-insensitive); otherwise the field
-/// is emitted (the shipped REF-202 default). Disabling it reproduces the
-/// pre-REF-202 `content[text]`-only tool-result shape from the *same* binary, so
-/// the B_sc-vs-B efficacy comparison isolates exactly one variable — the presence
-/// of `structuredContent` — while `content[text]` stays byte-identical.
-fn structured_content_enabled() -> bool {
-    match std::env::var("REFLEX_MCP_STRUCTURED_CONTENT") {
-        Ok(v) => !matches!(
-            v.trim().to_ascii_lowercase().as_str(),
-            "0" | "false" | "off" | "no"
-        ),
-        Err(_) => true,
-    }
-}
-
-/// REF-196 Stage 2: replace `content[text]` with a brief human summary.
-///
-/// When enabled, `content[text]` carries a short description (e.g. "Found 42
-/// matches in 3 files — see structuredContent") while the full data lives in
-/// `structuredContent`. This eliminates the Stage 1 double-payload cost: Stage 1
-/// emitted both the full JSON string AND the native object; Stage 2 emits only
-/// the summary string + the native object, so total token cost ≈ data once.
-///
-/// Only meaningful when `REFLEX_MCP_STRUCTURED_CONTENT` is also enabled.
-fn sc_stage2_enabled() -> bool {
-    match std::env::var("REFLEX_MCP_SC_STAGE2") {
-        Ok(v) => matches!(
-            v.trim().to_ascii_lowercase().as_str(),
-            "1" | "true" | "on" | "yes"
-        ),
-        Err(_) => false,
-    }
+    json!({
+        "content": [{"type": "text", "text": serde_json::to_string(&data).unwrap_or_default()}]
+    })
 }
 
 /// REF-209: columnar result-format toggle for `search_code` / `search_regex`.
 ///
 /// Default ON. Returns `false` only when `REFLEX_MCP_COLUMNAR` is explicitly set
 /// to a falsey value (`0`/`false`/`off`/`no`, case-insensitive), which restores
-/// the legacy file-grouped `results` array for backwards compatibility. Both the
-/// emitted payload (`to_columnar`) and the declared `outputSchema`
-/// (`schema_search_output`) consult this, so they never drift.
+/// the legacy file-grouped `results` array for backwards compatibility. The
+/// emitted payload (`to_columnar`) consults this to decide the shape.
 fn columnar_enabled() -> bool {
     match std::env::var("REFLEX_MCP_COLUMNAR") {
         Ok(v) => !matches!(
@@ -1077,22 +771,22 @@ fn onoff(v: bool) -> &'static str {
 /// Emitted to **stderr** at startup (never stdout, which carries the JSON-RPC
 /// stream). Claude Code captures an MCP server's stderr into its per-session
 /// `mcp-logs-<server>/` files, so this line is the ground-truth record of which
-/// `structuredContent` / Stage-2 / columnar behaviour a given trial actually ran
-/// with.
+/// `columnar` / structural behaviour a given trial actually ran with.
 ///
 /// It exists specifically to catch the failure mode behind [REF-212]: an env
-/// toggle (`REFLEX_MCP_SC_STAGE2=1`) that *was* forwarded to the process but was
-/// not honoured because the running binary predated the Stage-2 code. The
-/// reported flags reflect what THIS binary actually resolved, and `build=` names
-/// the commit it was compiled from — so a benchmark run against an out-of-date
-/// rfx is obvious rather than silently corrupting results.
-fn startup_flags_line(structured: bool, stage2: bool, columnar: bool, structural: bool) -> String {
+/// toggle that *was* forwarded to the process but was not honoured because the
+/// running binary predated the code that reads it. The reported flags reflect
+/// what THIS binary actually resolved, and `build=` names the commit it was
+/// compiled from — so a benchmark run against an out-of-date rfx is obvious
+/// rather than silently corrupting results.
+///
+/// REF-215 removed the `structuredContent` / `sc_stage2` flags along with the
+/// env vars that drove them.
+fn startup_flags_line(columnar: bool, structural: bool) -> String {
     format!(
-        "reflex-mcp startup: version={} build={} structuredContent={} sc_stage2={} columnar={} structural_tools={}",
+        "reflex-mcp startup: version={} build={} columnar={} structural_tools={}",
         env!("CARGO_PKG_VERSION"),
         option_env!("REFLEX_GIT_SHA").unwrap_or("unknown"),
-        onoff(structured),
-        onoff(stage2),
         onoff(columnar),
         onoff(structural),
     )
@@ -1220,118 +914,6 @@ fn to_columnar(mut value: Value) -> Value {
     obj.insert("columns".to_string(), json!(columns));
     obj.insert("rows".to_string(), Value::Array(rows));
     value
-}
-
-/// Generate a brief human-readable summary of a tool result for Stage 2
-/// `content[text]`. Inspects common result shape fields to produce a concise
-/// description. Falls back to a generic message for unrecognised shapes.
-fn brief_summary(data: &Value) -> String {
-    // find_references: definition + usages
-    if let Some(usages) = data.get("usages").and_then(|v| v.as_array()) {
-        let n = data
-            .get("total_count")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(usages.len() as u64);
-        let has_def = !data.get("definition").map(|v| v.is_null()).unwrap_or(true);
-        return if has_def {
-            format!("Definition + {} usage(s) — see structuredContent", n)
-        } else {
-            format!("{} usage(s) — see structuredContent", n)
-        };
-    }
-    // search_code / search_regex / find_references pagination shape
-    if let Some(pagination) = data.get("pagination") {
-        let total = pagination
-            .get("total")
-            .and_then(|v| v.as_u64())
-            .or_else(|| data.get("total_count").and_then(|v| v.as_u64()))
-            .unwrap_or(0);
-        let file_count = data
-            .get("results")
-            .and_then(|v| v.as_array())
-            .map(|a| a.len())
-            .unwrap_or(0);
-        return if file_count > 0 {
-            format!(
-                "Found {} match(es) across {} file(s) — see structuredContent",
-                total, file_count
-            )
-        } else {
-            format!("Found {} match(es) — see structuredContent", total)
-        };
-    }
-    // count_occurrences tool: {status, pattern, total, files}. `total` + a
-    // top-level `files` count is that tool's unique signature (search's own
-    // count-mode uses `count`, handled just below; list_locations uses
-    // `total_locations`), so this branch never steals another shape's summary.
-    if let (Some(total), Some(files)) = (
-        data.get("total").and_then(|v| v.as_u64()),
-        data.get("files").and_then(|v| v.as_u64()),
-    ) {
-        return format!(
-            "{} occurrence(s) across {} file(s) — see structuredContent",
-            total, files
-        );
-    }
-    // search_code / search_regex count-mode: {count, pattern}
-    if let Some(count) = data.get("count").and_then(|v| v.as_u64()) {
-        return format!("{} occurrence(s) — see structuredContent", count);
-    }
-    // list_locations
-    if let Some(n) = data
-        .get("total_locations")
-        .and_then(|v| v.as_u64())
-        .or_else(|| {
-            data.get("locations")
-                .and_then(|v| v.as_array())
-                .map(|a| a.len() as u64)
-        })
-    {
-        return format!("{} location(s) — see structuredContent", n);
-    }
-    // gather_context / project summary
-    if data.get("entry_points").is_some() || data.get("directory_structure").is_some() {
-        let files = data
-            .get("index_stats")
-            .and_then(|s| s.get("total_files"))
-            .and_then(|v| v.as_u64());
-        return match files {
-            Some(n) => format!("Project context: {} file(s) — see structuredContent", n),
-            None => "Project context — see structuredContent".to_string(),
-        };
-    }
-    // generic dependency / hotspot results
-    if let Some(arr) = data
-        .get("dependencies")
-        .or_else(|| data.get("dependents"))
-        .or_else(|| data.get("hotspots"))
-        .and_then(|v| v.as_array())
-    {
-        return format!("{} item(s) — see structuredContent", arr.len());
-    }
-    "Result — see structuredContent".to_string()
-}
-
-/// Inner builder split out from [`make_tool_result`] so both output shapes are
-/// unit-testable without mutating process-global env (which would race cargo's
-/// parallel test threads).
-///
-/// - `structured = false`: legacy `content[text]`-only JSON string (B_nosc arm)
-/// - `structured = true, stage2 = false`: Stage 1 — full JSON in both fields (B_sc arm)
-/// - `structured = true, stage2 = true`: Stage 2 — brief summary in `content[text]`,
-///   full data in `structuredContent` (B_sc2 arm; the token-saving production target)
-fn make_tool_result_with(data: Value, structured: bool, stage2: bool) -> Value {
-    let text = if structured && stage2 {
-        brief_summary(&data)
-    } else {
-        serde_json::to_string(&data).unwrap_or_default()
-    };
-    let content = json!([{"type": "text", "text": text}]);
-    if structured {
-        json!({ "content": content, "structuredContent": data })
-    } else {
-        json!({ "content": content })
-    }
 }
 
 fn handle_call_tool(params: Option<Value>) -> Result<Value> {
@@ -2398,19 +1980,14 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
             // gather_context returns human-readable prose, not JSON. Running it
             // through make_tool_result would JSON-encode (quote + escape) the text
             // and change content[text]; instead keep content[text] as the raw
-            // string and expose the same prose under structuredContent (REF-202).
+            // string (REF-215: content[text] only, no structuredContent).
             let context_text = format!("{}{}", context, hint);
-            let mut result = json!({
+            let result = json!({
                 "content": [{
                     "type": "text",
-                    "text": context_text.clone()
+                    "text": context_text
                 }]
             });
-            // REF-204: gate the additive structuredContent for A/B measurement,
-            // keeping content[text] byte-identical (see structured_content_enabled).
-            if structured_content_enabled() {
-                result["structuredContent"] = json!({ "context": context_text });
-            }
             Ok(result)
         }
         "check_index_status" => {
@@ -2720,12 +2297,7 @@ fn run_mcp_server_io_impl<R: BufRead, W: Write>(
     // running binary actually honoured and pins the exact build it came from.
     eprintln!(
         "{}",
-        startup_flags_line(
-            structured_content_enabled(),
-            sc_stage2_enabled(),
-            columnar_enabled(),
-            enable_structural,
-        )
+        startup_flags_line(columnar_enabled(), enable_structural)
     );
 
     for line in reader.lines() {
@@ -2869,18 +2441,22 @@ mod tests {
         assert_eq!(resp["result"]["serverInfo"]["name"], "reflex");
     }
 
-    // REF-202: make_tool_result must emit BOTH the legacy content[text] JSON
-    // string (unchanged) and the 2025-11-25 structuredContent object (same data).
+    // REF-215: make_tool_result must emit ONLY the spec-guaranteed content[text]
+    // JSON string — no structuredContent key. Dropped per the REF-196 board
+    // decision so no client can consume both fields and double-count tokens.
     #[test]
-    fn test_make_tool_result_dual_shape() {
+    fn test_make_tool_result_content_text_only() {
         let data = json!({"status": "fresh", "count": 3});
         let result = super::make_tool_result(data.clone());
 
-        // structuredContent carries the native object verbatim.
-        assert_eq!(result["structuredContent"], data);
+        // No structuredContent key anywhere in the result.
+        assert!(
+            result.get("structuredContent").is_none(),
+            "make_tool_result must not emit structuredContent (REF-215): {result}"
+        );
 
-        // content[text] is the same data serialized as a JSON string, so existing
-        // clients that only read content[text] keep getting identical output.
+        // content[text] is the data serialized as a JSON string and round-trips
+        // back to the original object.
         assert_eq!(result["content"][0]["type"], "text");
         let text = result["content"][0]["text"]
             .as_str()
@@ -2888,88 +2464,14 @@ mod tests {
         let roundtrip: serde_json::Value =
             serde_json::from_str(text).expect("content[text] must be valid JSON");
         assert_eq!(roundtrip, data);
-    }
 
-    // REF-204: the structuredContent field is a runtime A/B toggle. With it
-    // disabled, content[text] must be byte-identical to the enabled shape and
-    // structuredContent must be absent (reproducing pre-REF-202 output). Tested
-    // via the inner builder so no process-global env is mutated (race-free under
-    // cargo's parallel test threads).
-    #[test]
-    fn test_make_tool_result_toggle_off_omits_structured_content() {
-        let data = json!({"status": "fresh", "count": 3});
-        let on = super::make_tool_result_with(data.clone(), true, false);
-        let off = super::make_tool_result_with(data.clone(), false, false);
-
-        // Enabled shape matches the shipped REF-202 default.
-        assert_eq!(on["structuredContent"], data);
-
-        // Disabled shape drops structuredContent entirely...
-        assert!(off.get("structuredContent").is_none());
-        // ...but leaves content[text] byte-identical, so the only measured
-        // difference between the B and B_sc arms is the extra field.
-        assert_eq!(off["content"], on["content"]);
-    }
-
-    // REF-196 Stage 2: brief summary in content[text], full data in structuredContent.
-    #[test]
-    fn test_make_tool_result_stage2_summary() {
-        let data = json!({
-            "status": "ok",
-            "pagination": {"total": 42, "count": 42, "offset": 0, "limit": 200, "has_more": false},
-            "results": [{"path": "a.rs"}, {"path": "b.rs"}],
-            "total_count": 42,
-            "returned_count": 42
-        });
-        let stage2 = super::make_tool_result_with(data.clone(), true, true);
-        // structuredContent still holds the full data
-        assert_eq!(stage2["structuredContent"], data);
-        // content[text] is a brief summary, not the full JSON blob
-        let text = stage2["content"][0]["text"].as_str().unwrap();
-        assert!(
-            text.contains("42"),
-            "summary should mention match count: {}",
-            text
+        // The result object carries exactly the `content` key and nothing else,
+        // so the tool-result shape is strictly content[text]-only.
+        assert_eq!(
+            result.as_object().map(|o| o.len()),
+            Some(1),
+            "result must contain only the `content` key: {result}"
         );
-        assert!(
-            text.contains("structuredContent"),
-            "summary should reference structuredContent: {}",
-            text
-        );
-        assert!(
-            text.len() < 120,
-            "summary should be brief (< 120 chars): {}",
-            text
-        );
-    }
-
-    // REF-196 Stage 2: count_occurrences ({status,pattern,total,files}) must get
-    // an informative occurrence summary, not the generic "Result —…" fallback.
-    // Its `total`+`files` signature is distinct from search count-mode (`count`)
-    // and list_locations (`total_locations`), so no other shape is mis-summarised.
-    #[test]
-    fn test_brief_summary_count_occurrences_shape() {
-        let data = json!({"status": "fresh", "pattern": "foo", "total": 31, "files": 4});
-        let summary = super::brief_summary(&data);
-        assert!(summary.contains("31 occurrence(s)"), "summary: {summary}");
-        assert!(summary.contains("4 file(s)"), "summary: {summary}");
-        assert!(summary.contains("structuredContent"), "summary: {summary}");
-
-        // search count-mode ({count, pattern}) keeps its own occurrence summary.
-        let count_mode = json!({"count": 7, "pattern": "bar"});
-        assert!(
-            super::brief_summary(&count_mode).contains("7 occurrence(s)"),
-            "count-mode summary should still work"
-        );
-    }
-
-    // REF-204: default (env unset) must keep structuredContent enabled so the
-    // shipped contract is unchanged unless a caller explicitly opts out.
-    #[test]
-    fn test_structured_content_enabled_default_on() {
-        // NOTE: relies on REFLEX_MCP_STRUCTURED_CONTENT being unset in the test
-        // environment (the harness never sets it); asserts the default only.
-        assert!(super::structured_content_enabled());
     }
 
     // REF-209: columnar output is the shipped default unless a caller opts out.
@@ -2984,19 +2486,20 @@ mod tests {
     // visible in Claude Code's mcp-logs for any trial.
     #[test]
     fn test_startup_flags_line_reports_resolved_flags() {
-        let line = super::startup_flags_line(true, true, false, true);
+        // REF-215: only columnar + structural_tools remain (structuredContent /
+        // sc_stage2 were removed along with the env vars that drove them).
+        let line = super::startup_flags_line(false, true);
         assert!(line.starts_with("reflex-mcp startup:"), "line: {line}");
-        assert!(line.contains("structuredContent=on"), "line: {line}");
-        assert!(line.contains("sc_stage2=on"), "line: {line}");
         assert!(line.contains("columnar=off"), "line: {line}");
         assert!(line.contains("structural_tools=on"), "line: {line}");
         // Build provenance present so an out-of-date rfx is identifiable.
         assert!(line.contains("build="), "line: {line}");
+        // The removed flags must not reappear in the diagnostic.
+        assert!(!line.contains("structuredContent"), "line: {line}");
+        assert!(!line.contains("sc_stage2"), "line: {line}");
 
         // Inverting every flag flips exactly the on/off tokens.
-        let off = super::startup_flags_line(false, false, true, false);
-        assert!(off.contains("structuredContent=off"), "line: {off}");
-        assert!(off.contains("sc_stage2=off"), "line: {off}");
+        let off = super::startup_flags_line(true, false);
         assert!(off.contains("columnar=on"), "line: {off}");
         assert!(off.contains("structural_tools=off"), "line: {off}");
     }

@@ -104,7 +104,7 @@ ARMS = {
         "append_system_prompt": None,
     },
     "B": {
-        "description": "Realistic: Reflex MCP enabled + built-ins available + CLAUDE.md Reflex-first nudge",
+        "description": "Realistic: Reflex MCP enabled + built-ins available; Reflex-first nudge via MCP initialize instructions field",
         "mcp_command": "TARGET_RELEASE_RFX",
         # --strict-mcp-config prevents stray project MCP servers (pw, Roam, etc.)
         # from loading alongside Reflex, which contaminated some Phase 4 arm C trials.
@@ -124,7 +124,7 @@ ARMS = {
         "append_system_prompt": None,
     },
     "Bprime": {
-        "description": "No-nudge (secondary): Reflex MCP enabled, no Reflex-first instruction",
+        "description": "No-nudge (secondary): Reflex MCP enabled; MCP initialize nudge suppressed via append_system_prompt override",
         "mcp_command": "TARGET_RELEASE_RFX",
         "extra_flags": ["--strict-mcp-config", "--dangerously-skip-permissions"],
         "disallowed_tools": [],

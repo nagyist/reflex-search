@@ -1502,16 +1502,22 @@ fn resolve_longest_module_prefix(base_dir: &std::path::Path, parts: &[&str]) -> 
 
 /// Strip `project_root` from an absolute resolved path to yield a workspace-relative path.
 ///
-/// Returns the path unchanged when `project_root` is absent/empty or is not a prefix of
-/// `path` (e.g. the input was already relative).
+/// Returns the path (still normalized to forward slashes) unchanged when `project_root` is
+/// absent/empty or is not a prefix of `path` (e.g. the input was already relative).
+///
+/// The result always uses forward slashes so resolved import paths are deterministic and
+/// match the forward-slash paths stored in the dependency index on every platform. Without
+/// this, `PathBuf::join` yields backslash-separated paths on Windows, which would neither
+/// match the index nor equal the expected output (see the other parsers, which normalize
+/// the same way).
 fn relativize_to_project_root(path: &str, project_root: Option<&str>) -> String {
     if let Some(root) = project_root
         && !root.is_empty()
         && let Ok(rel) = std::path::Path::new(path).strip_prefix(root)
     {
-        return rel.to_string_lossy().to_string();
+        return rel.to_string_lossy().replace('\\', "/");
     }
-    path.to_string()
+    path.replace('\\', "/")
 }
 
 /// Resolve a Rust module path (list of components) to a file path

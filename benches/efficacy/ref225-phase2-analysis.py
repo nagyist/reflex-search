@@ -61,18 +61,44 @@ ENDPOINTS = ["assistant_turns", "total_tool_calls", "total_tokens"]
 ALPHA = 0.05
 
 
+def _endpoint_value(row, endpoint):
+    """Extract an endpoint value from a metrics row.
+
+    total_tokens is NOT a raw CSV column; per the pre-registered REF-222
+    definition (analyze.py:153) it is the sum of all token columns —
+    input + output + cache_read + cache_creation — deliberately including
+    cache because that is the MCP context tax we are measuring.
+    """
+    if endpoint == "total_tokens":
+        parts = ["input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens"]
+        total = 0.0
+        seen = False
+        for p in parts:
+            v = (row.get(p) or "").strip()
+            if v:
+                try:
+                    total += float(v)
+                    seen = True
+                except ValueError:
+                    pass
+        return total if seen else None
+    v = (row.get(endpoint) or "").strip()
+    if not v:
+        return None
+    try:
+        return float(v)
+    except ValueError:
+        return None
+
+
 def get_trial_pairs(rows, endpoint):
     """Paired (a, b) values per (task_id, trial) over the VALID task set."""
     a_map, b_map = {}, {}
     for r in rows:
         if r.get("task_id") not in VALID_TASK_IDS:
             continue
-        v = (r.get(endpoint) or "").strip()
-        if not v:
-            continue
-        try:
-            fv = float(v)
-        except ValueError:
+        fv = _endpoint_value(r, endpoint)
+        if fv is None:
             continue
         key = (r["task_id"], r.get("trial", ""))
         if r.get("arm") == "A":

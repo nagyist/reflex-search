@@ -205,6 +205,77 @@ search_ast(pattern: "(function_item) @fn", lang: "rust")
 
 ---
 
+## Efficiency Notes (A/B Tested)
+
+### Columnar result format
+
+`search_code` and `search_regex` return results in `{columns, rows}` format by default.
+**Measured savings: 16–24% per-call bytes** vs the legacy `results[]` object shape. The
+`~41%` theoretical estimate assumed file-grouped output; the flat columnar format still
+repeats `path` and `language` on every row, so savings are smaller in practice.
+
+To revert to the legacy shape: `REFLEX_MCP_COLUMNAR=0`.
+
+### Reflex vs built-in grep/glob (total token cost)
+
+**At parity with built-in grep/glob on total tokens — real wins are capability and ~31% lower
+cost (REF-192).** Powered A/B rerun (REF-222: n=9 tasks × 8 trials per arm, claude-sonnet-4-6):
+r=1.044, 95% CI [1.014, 1.262] — within the ±10% parity band, 100% task success on both arms,
+arm B showing higher recall on large result sets (graded accuracy).
+
+**REF-176 → REF-217 → REF-222 arc (did parity hold?):** All three runs land at the same point
+estimate (~1.04). REF-217 (n=3, CI width 1.012) was noisy; REF-222 (n=9, CI width 0.248) is 4×
+tighter. The "Indeterminate" label is a method note — the CI upper bound clips 1.262, not a
+regression. Parity was never lost.
+
+*Method note:* At equal turn counts, Reflex overhead is only ~**1–2%** (tool schema context per
+turn). Turn-count variance drives the spread (corr(total_tokens, turns) ≈ 0.99, REF-204).
+
+Per-task ratios (REF-222, n=9 tasks, sorted):
+
+| Task | B/A ratio | Turns A | Turns B |
+|------|-----------|---------|---------|
+| reflex-findall-symbolcache | 1.012 | 2 | 2 |
+| ripgrep-findall-sinkcontext | 1.014 | 2 | 2 |
+| ripgrep-findall-sinkmatch | 1.016 | 2 | 2 |
+| reflex-findall-trigramindex | 1.024 | 2 | 2 |
+| tokio-findall-joinerror | 1.044 | 2 | 2 |
+| tokio-findall-barrier | 1.054 | 2 | 2 |
+| tokio-findall-notified | 1.148 | 2 | 2 |
+| ripgrep-findall-mmapchoice | 1.262 | 2 | 2 |
+| reflex-findall-extract_symbols | 1.450 | 2 | 3 |
+| **Median** | **1.044** | | |
+
+**The extract_symbols outlier (1.45) is a turn-count effect**: arm B used 3 turns (more Reflex tool
+calls) vs arm A's 2 turns (single Grep). All other tasks ran at equal turns → near parity.
+
+**When to prefer Reflex over built-in grep/glob:**
+- Symbol-aware search (`symbols: true`, `kind: "function"`) — unavailable in grep/glob
+- Dependency analysis (`get_dependencies`, `get_dependents`, `find_hotspots`)
+- Atomic find-all-usages in one call (`find_references`)
+- Large result sets where columnar format reduces payload size
+
+**When built-in grep/glob may be cheaper:** Simple literal string lookups with ≤1 tool call,
+where the context tax outweighs Reflex's capability advantage.
+
+### structuredContent: evaluated and rejected
+
+MCP's `outputSchema` / `structuredContent` mechanism was:
+
+1. **Built** — implemented in `src/mcp.rs` with `outputSchema` on all tool responses
+2. **A/B tested** — ratio **0.998**, no measurable token savings
+3. **Removed** — `content[text]`-only output (current default)
+
+**Root cause:** Claude Code's MCP client transmits *both* `content[text]` *and*
+`structuredContent` to the model. Neither field is dropped, so total token cost is
+identical regardless of whether the server populates `structuredContent`.
+
+`structuredContent` remains viable only for a client that honors `outputSchema` and drops
+the `content[text]` block. Claude Code does not. Do not re-implement without first
+confirming client behavior.
+
+---
+
 ## See Also
 
 - [Claude Code + Reflex MCP Quickstart](./ai-agent-integration.md) — MCP setup, key tools, troubleshooting, and CLI/JSON fallback

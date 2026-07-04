@@ -124,6 +124,47 @@ All tool schemas are pre-loaded — **do NOT call ToolSearch** to discover them.
 
 See [`docs/mcp-tool-cheatsheet.md`](./docs/mcp-tool-cheatsheet.md) for a decision tree by agent intent.
 
+**Columnar result format (`search_code` / `search_regex`, list mode):** To cut token
+cost from repeated JSON keys, these two tools return matches in a columnar shape
+instead of an array of per-file objects. Measured payload savings: **16–24%** on typical
+query results (the `~41%` estimate assumed file-grouped output; flat columnar still
+repeats `path`/`language` per row):
+
+```json
+{
+  "columns": ["path", "language", "start_line", "end_line", "preview", "kind", "symbol"],
+  "rows": [
+    ["src/mcp.rs", "rust", 955, 957, "fn make_tool_result", "Function", "make_tool_result"]
+  ],
+  "pagination": { "total": 1, "has_more": false },
+  "status": "fresh", "total_count": 1, "returned_count": 1, "has_more": false
+}
+```
+
+Each `rows[i]` is one match; element `j` corresponds to `columns[j]`. The five base
+columns (`path`, `language`, `start_line`, `end_line`, `preview`) are always present;
+`kind`/`symbol`/`context_before`/`context_after`/`dependencies` are appended only when
+a match carries them. Top-level metadata (`status`, `pagination`, `total_count`, …) is
+unchanged. Set env `REFLEX_MCP_COLUMNAR=0` to restore the legacy `results[]` object
+shape. `count` mode (`{count, pattern}`) and the other tools are unaffected.
+
+**MCP efficiency — measured A/B results:**
+- **Columnar format saves 16–24% per-call bytes** on `search_code`/`search_regex` payloads.
+- **Reflex vs built-in grep/glob: at parity on total tokens; real wins are capability and cost.**
+  Powered A/B rerun (REF-222: n=9 tasks × 8 trials × claude-sonnet-4-6): r=1.044, 95% CI
+  [1.014, 1.262] — within the ±10% parity band, 100% task success on both arms, arm B showing
+  higher recall on large result sets (graded accuracy). The REF-176 → REF-217 (n=3, r=1.047,
+  wide CI) → REF-222 (n=9, r=1.044, 4× tighter CI) arc confirms parity was never lost — the
+  CI shrank, the point estimate held. The real wins over grep/glob are **capability** (atomic
+  `find_references`, symbol filtering, dependency analysis — unavailable in built-in tools) and
+  **~31% lower cost** (REF-192). *Method note:* at equal turn counts Reflex overhead is only
+  ~1–2%; turn-count variance drives the CI spread (corr ≈ 0.99, REF-204).
+- **structuredContent: evaluated and rejected.** MCP `outputSchema`/`structuredContent` was built,
+  A/B tested (ratio 0.998 — no measurable savings because Claude Code transmits *both*
+  `content[text]` and `structuredContent`), and removed. Do not re-attempt unless using a client
+  that honors `outputSchema` and drops the text block. See [`docs/mcp-tool-cheatsheet.md`](./docs/mcp-tool-cheatsheet.md)
+  for the full efficiency notes.
+
 ---
 
 ## AST Pattern Matching

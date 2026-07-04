@@ -1,0 +1,524 @@
+# Efficacy task corpus — REF-225 iteration-forcing A/B study.
+# Pre-registered before arm-A trial 1. Do not edit after run-ref225-arm-a.sh starts.
+#
+# Design rationale (REF-225 spec document):
+#   The 8 "obvious" candidates from REF-222 (locate_definition, find_all_usages,
+#   refactor_scope) were dropped because grep -rnw <Identifier> one-shots them —
+#   the identifier is invariant across aliases/re-exports. These tasks are in three
+#   categories where grep genuinely CANNOT one-shot the answer:
+#     1. comprehension     — "explain how X works" requires reading multiple files
+#     2. transitive_dep    — grep finds DIRECT users only; transitive needs N rounds
+#     3. cross_module      — the connection spans files with *different* identifiers
+#
+# Strongest-grep gate (pre-registered): passed when a bare `grep -rnw <key_id>`
+# does NOT return the complete answer in one invocation.
+#
+# Validity gate (arm-A data, checked before unblinding B):
+#   median arm-A assistant_turns >= 4 per task.
+#
+# Scoring: comprehension and cross_module tasks use rubric type (LLM-judge graded,
+# Phase 5). Transitive dep tasks also use rubric since oracle.py cannot compute
+# transitive closure via a single ripgrep command; expected_files are pre-computed
+# manually via the dependency analysis in the REF-225 spec.
+#
+# Repo pinned SHAs (see repos.md):
+#   reflex : d2935f48f5abea2a76b479040a23478155be9bb0
+#   ripgrep: 4649aa9700619f94cf9c66876e9549d83420e16c
+#   tokio  : ab3ff69cf2258a8c696b2dca89a2cef4ff114c1c
+
+tasks:
+
+  # ── Category: comprehension (Reflex) ────────────────────────────────────────
+
+  - id: reflex-comp-query-path
+    repo: reflex
+    repo_sha: d2935f48f5abea2a76b479040a23478155be9bb0
+    category: comprehension
+    expect_reflex: win
+    prompt: >-
+      In the Reflex repository, trace the execution path from the moment
+      `rfx query <term>` is received by `main.rs` to the first match result
+      being written to stdout. For each step, name the function called and the
+      source file it lives in. Include at least the dispatch from `main.rs`,
+      the query-handling function in the CLI layer, the core search call, and
+      the output step.
+    ground_truth:
+      type: rubric
+      expected_files:
+        - src/main.rs
+        - src/cli/query.rs
+        - src/query/mod.rs
+      required_facts:
+        - "main.rs (or cli/mod.rs) dispatches the `query` subcommand to the cli/query module"
+        - "cli/query.rs creates a QueryEngine from the CacheManager and calls search_with_metadata() or search()"
+        - "QueryEngine is defined in src/query/mod.rs"
+        - "results are formatted and printed via src/output.rs or src/formatter.rs"
+    oracle_notes: >-
+      Verified in corpus@d2935f48: (1) src/main.rs exists; (2) src/cli/query.rs
+      creates QueryEngine (line 65) and calls engine.search_with_metadata() (line 371);
+      (3) QueryEngine::search_with_metadata defined in src/query/mod.rs line 260;
+      (4) output.rs / formatter.rs handle result display. Grep gate: `grep -rnw "query"
+      src/` returns 200+ hits across many files — does NOT identify the linear execution
+      chain. Arm-A must read and follow the dispatch path across at least 3 files,
+      requiring >= 4 turns.
+
+  - id: reflex-comp-trigram-extract
+    repo: reflex
+    repo_sha: d2935f48f5abea2a76b479040a23478155be9bb0
+    category: comprehension
+    expect_reflex: win
+    prompt: >-
+      How does Reflex extract trigrams from a source file during indexing?
+      Trace from the raw file bytes to the completed list of (Trigram, FileLocation)
+      pairs that are written into the index. Name the key function at each step
+      and the source file it lives in.
+    ground_truth:
+      type: rubric
+      expected_files:
+        - src/trigram.rs
+        - src/indexer.rs
+      required_facts:
+        - "extract_trigrams_with_locations() in src/trigram.rs converts a text string into Vec<(Trigram, FileLocation)>"
+        - "trigrams are 3-byte sliding-window substrings of the UTF-8 text"
+        - "the Indexer reads file content and calls trigram extraction, then TrigramIndex::index_file() stores the results"
+        - "src/indexer.rs orchestrates reading, hashing (blake3), and trigram indexing per file"
+    oracle_notes: >-
+      Verified in corpus@d2935f48: extract_trigrams_with_locations at trigram.rs:1265;
+      TrigramIndex::index_file called from indexer.rs:635. Grep gate: `grep -rnw
+      "extract_trigrams" src/` returns hits in both files but does NOT explain the
+      algorithm or the calling sequence — agent must read trigram.rs + indexer.rs
+      to synthesize the answer. Arm-A requires >= 4 turns.
+
+  - id: reflex-comp-deleted-file
+    repo: reflex
+    repo_sha: d2935f48f5abea2a76b479040a23478155be9bb0
+    category: comprehension
+    expect_reflex: win
+    prompt: >-
+      When `rfx index` is run and a previously-indexed file has been deleted from
+      disk since the last run, what does Reflex do? Does it detect the deletion?
+      Does it remove the file's entries from the index? Trace the code path that
+      handles this situation, naming the relevant functions and source files.
+    ground_truth:
+      type: rubric
+      expected_files:
+        - src/indexer.rs
+        - src/cache.rs
+      required_facts:
+        - "Reflex detects deleted files via a count comparison: when total discovered files != existing_hashes.len(), a full rebuild is triggered"
+        - "existing_hashes are loaded by cache.load_hashes_for_branch() in src/indexer.rs around line 163"
+        - "the mismatch check is in src/indexer.rs around line 151 (total_files != existing_hashes.len())"
+        - "a full rebuild re-indexes only the currently present files, effectively removing deleted files from the new index"
+    oracle_notes: >-
+      Verified in corpus@d2935f48: load_hashes_for_branch() called in indexer.rs ~line
+      163; file count mismatch check ~line 151 triggers rebuild. Grep gate: `grep -rnw
+      "deleted" src/` returns 0 useful results; `grep -rn "exist" src/indexer.rs` gives
+      many hits but does NOT reveal the count-comparison rebuild mechanism — agent must
+      read through indexer.rs logic. Arm-A requires >= 4 turns to read and reason.
+
+  - id: reflex-comp-mcp-dispatch
+    repo: reflex
+    repo_sha: d2935f48f5abea2a76b479040a23478155be9bb0
+    category: comprehension
+    expect_reflex: win
+    prompt: >-
+      How does the Reflex MCP server handle an incoming `tools/call` JSON-RPC
+      request? Trace from the raw JSON arriving on stdin to the specific search or
+      analysis function being invoked for a given tool name. Name each function in
+      the call chain and the file that defines it.
+    ground_truth:
+      type: rubric
+      expected_files:
+        - src/mcp.rs
+      required_facts:
+        - "the main MCP loop reads JSON-RPC lines from stdin and routes `tools/call` to handle_call_tool()"
+        - "handle_call_tool() in src/mcp.rs dispatches on the `name` string field to individual tool handlers"
+        - "each tool handler (e.g. search_code arm) extracts arguments from the JSON params and calls the corresponding QueryEngine or analysis method"
+        - "the response is serialized back to JSON and written to stdout"
+    oracle_notes: >-
+      Verified in corpus@d2935f48: mcp.rs line 1863 routes tools/call;
+      handle_call_tool() at line 636 dispatches on tool name; individual arms call
+      QueryEngine methods. Grep gate: `grep -rnw "tools/call" src/` returns 2 hits
+      in mcp.rs but does NOT show the full dispatch chain — agent must read
+      handle_call_tool and trace into handlers. Arm-A requires >= 4 turns.
+
+  # ── Category: comprehension (ripgrep) ───────────────────────────────────────
+
+  - id: ripgrep-comp-binary
+    repo: ripgrep
+    repo_sha: 4649aa9700619f94cf9c66876e9549d83420e16c
+    category: comprehension
+    expect_reflex: win
+    prompt: >-
+      How does ripgrep detect that a file contains binary data, and what does it
+      do when binary data is found? Trace from the raw byte stream through
+      `BinaryDetection` to the decision to suppress, report-offset, or search the
+      file. Name each relevant struct and function and the source file it lives in.
+    ground_truth:
+      type: rubric
+      expected_files:
+        - crates/searcher/src/lib.rs
+        - crates/searcher/src/searcher/mod.rs
+        - crates/core/search.rs
+      required_facts:
+        - "BinaryDetection in crates/grep-searcher (searcher/src/lib.rs) has variants: none, quit, convert"
+        - "the Searcher reads a line buffer and checks for binary bytes (NUL byte by default)"
+        - "on detection, the searcher either quits (reporting the binary_byte_offset to the Sink) or converts NUL bytes"
+        - "crates/core/search.rs sets BinaryDetection policy based on CLI flags before building the Searcher"
+    oracle_notes: >-
+      Verified in corpus@4649aa97: BinaryDetection in searcher/src/lib.rs; glue.rs
+      and searcher/mod.rs perform detection; crates/core/flags/hiargs.rs +
+      search.rs configure the policy. Grep gate: `grep -rnw "BinaryDetection"
+      crates/` returns 12 hits across 5 files — does NOT explain the detection
+      mechanism or the quit/convert policy path. Arm-A must read multiple files.
+
+  - id: ripgrep-comp-type-flag
+    repo: ripgrep
+    repo_sha: 4649aa9700619f94cf9c66876e9549d83420e16c
+    category: comprehension
+    expect_reflex: win
+    prompt: >-
+      How does ripgrep handle the `--type` flag end-to-end? Trace from the CLI
+      argument being parsed through `TypesBuilder` / the ignore `types.rs` module
+      to the file-inclusion filter applied during the directory walk. Name each
+      key struct or function and its source file.
+    ground_truth:
+      type: rubric
+      expected_files:
+        - crates/core/flags/hiargs.rs
+        - crates/ignore/src/types.rs
+      required_facts:
+        - "the --type flag is parsed in crates/core/flags/hiargs.rs and stored as a type selection"
+        - "TypesBuilder in crates/ignore/src/types.rs constructs a Types matcher from file-type glob definitions"
+        - "the resulting Types object is attached to WalkBuilder and applied per directory entry during the walk"
+        - "built-in type definitions (e.g. rust → *.rs) are registered in types.rs or loaded from defaults"
+    oracle_notes: >-
+      Verified in corpus@4649aa97: hiargs.rs references TypesBuilder; ignore/src/types.rs
+      defines TypesBuilder and built-in type globs. Grep gate: `grep -rnw "TypesBuilder"
+      crates/` returns hits in 3 files but does NOT explain the full pipeline from CLI
+      arg to walk filter. Arm-A must trace through multiple modules.
+
+  - id: ripgrep-comp-parallel
+    repo: ripgrep
+    repo_sha: 4649aa9700619f94cf9c66876e9549d83420e16c
+    category: comprehension
+    expect_reflex: win
+    prompt: >-
+      How does ripgrep distribute search work across multiple threads? Identify the
+      component that parallelizes the directory walk, how individual files are
+      dispatched to worker threads, and how the search results are collected or
+      printed without interleaving. Name each relevant struct and the source file.
+    ground_truth:
+      type: rubric
+      expected_files:
+        - crates/ignore/src/walk.rs
+        - crates/core/search.rs
+      required_facts:
+        - "WalkParallel in crates/ignore/src/walk.rs parallelizes directory traversal using a thread pool"
+        - "each thread receives DirEntry values via a work-stealing or channel mechanism"
+        - "crates/core/search.rs wraps each worker with a SearchWorker that holds the Searcher and Printer"
+        - "output ordering / non-interleaving is handled via locking or per-thread output buffers"
+    oracle_notes: >-
+      Verified in corpus@4649aa97: WalkParallel defined in walk.rs ~line 590;
+      search.rs creates SearchWorker per thread. Grep gate: `grep -rnw "WalkParallel"
+      crates/` returns 3 hits — does NOT explain the dispatch mechanism or output
+      coordination. Arm-A must read multiple files.
+
+  # ── Category: comprehension (tokio) ─────────────────────────────────────────
+
+  - id: tokio-comp-work-steal
+    repo: tokio
+    repo_sha: ab3ff69cf2258a8c696b2dca89a2cef4ff114c1c
+    category: comprehension
+    expect_reflex: win
+    prompt: >-
+      Explain how tokio's multi-threaded scheduler implements work stealing. Which
+      data structures hold the per-worker task queue and the steal-able portion?
+      Where does the steal loop appear in the source? Name each relevant struct and
+      the source file that defines it.
+    ground_truth:
+      type: rubric
+      expected_files:
+        - tokio/src/runtime/scheduler/multi_thread/worker.rs
+        - tokio/src/runtime/scheduler/multi_thread/queue.rs
+      required_facts:
+        - "each worker has a local task deque (Local queue) and a stealer handle (Steal)"
+        - "queue.rs in runtime/scheduler/multi_thread/ defines the local/steal queue split"
+        - "worker.rs contains the steal loop: when a worker's local queue is empty it tries to steal from other workers via their Steal handles"
+        - "the Inject queue serves as the global overflow queue for tasks that can't fit in a local queue"
+    oracle_notes: >-
+      Verified in corpus@ab3ff69c: queue.rs in scheduler/multi_thread/; worker.rs
+      contains the run loop and steal logic. Grep gate: `grep -rnw "steal" tokio/src/`
+      returns many hits across test files and docs — does NOT locate the core steal
+      loop or explain the queue split. Arm-A must read multiple files.
+
+  - id: tokio-comp-task-abort
+    repo: tokio
+    repo_sha: ab3ff69cf2258a8c696b2dca89a2cef4ff114c1c
+    category: comprehension
+    expect_reflex: win
+    prompt: >-
+      What happens to a spawned tokio task when its `JoinHandle` is dropped before
+      the task completes — is the task cancelled or does it continue running? If
+      `JoinHandle::abort()` is called instead, trace what happens: where is the
+      abort signal set, how does the running task observe it, and what is the final
+      outcome? Name the relevant structs and source files.
+    ground_truth:
+      type: rubric
+      expected_files:
+        - tokio/src/runtime/task/abort.rs
+        - tokio/src/runtime/task/mod.rs
+        - tokio/src/runtime/task/join.rs
+      required_facts:
+        - "dropping a JoinHandle detaches the handle but does NOT cancel the task — it continues running"
+        - "JoinHandle::abort() (or AbortHandle::abort()) sets an abort flag in the task's internal state"
+        - "the task's poll step checks the abort flag and returns Poll::Ready(Err(JoinError::cancelled()))"
+        - "AbortHandle is defined in runtime/task/abort.rs and holds a weak reference to the task cell"
+    oracle_notes: >-
+      Verified in corpus@ab3ff69c: abort.rs defines AbortHandle; join.rs defines
+      JoinHandle; mod.rs has the task state machine with abort handling.
+      Grep gate: `grep -rnw "abort" tokio/src/` returns 200+ hits including tests
+      and docs — does NOT explain the detach vs cancel distinction or the state
+      machine flow. Arm-A must trace through 3+ files.
+
+  - id: tokio-comp-io-driver
+    repo: tokio
+    repo_sha: ab3ff69cf2258a8c696b2dca89a2cef4ff114c1c
+    category: comprehension
+    expect_reflex: win
+    prompt: >-
+      Explain tokio's I/O driver architecture. How does it convert OS-level events
+      (from epoll / kqueue / IOCP via `mio`) into wakeups for pending async I/O
+      futures? Trace from the `mio::Poll::poll()` call through event dispatch to
+      the future being re-polled. Name each key struct and the source file.
+    ground_truth:
+      type: rubric
+      expected_files:
+        - tokio/src/runtime/io/mod.rs
+        - tokio/src/runtime/io/scheduled_io.rs
+      required_facts:
+        - "the IO driver in tokio/src/runtime/io/ wraps mio::Poll"
+        - "ScheduledIo in scheduled_io.rs holds the Waker(s) for each registered IO resource"
+        - "when mio returns an event for a resource, the driver looks up the corresponding ScheduledIo and wakes its waker"
+        - "IO resources register with the driver via Registration, which gives them a ScheduledIo token"
+    oracle_notes: >-
+      Verified in corpus@ab3ff69c: io/mod.rs and io/driver.rs wrap mio::Poll;
+      scheduled_io.rs holds wakers. Grep gate: `grep -rnw "ScheduledIo" tokio/src/`
+      returns hits in ~6 files — does NOT explain the full event → wakeup path.
+      Arm-A must trace registration → event dispatch → wakeup across multiple files.
+
+  # ── Category: transitive_dep (Reflex) ───────────────────────────────────────
+  # These use rubric type because oracle.py cannot compute transitive closure via
+  # a single ripgrep command. expected_files are pre-computed manually (see spec).
+
+  - id: reflex-trans-content-store
+    repo: reflex
+    repo_sha: d2935f48f5abea2a76b479040a23478155be9bb0
+    category: reverse_dependency
+    expect_reflex: win
+    prompt: >-
+      Which source files in the Reflex `src/` tree transitively depend on the
+      `content_store` module? Specifically: (a) list every file that directly
+      imports `crate::content_store` (depth-1), and (b) list every file that
+      imports any of those depth-1 modules in turn (depth-2). Report the combined
+      set with no duplicates.
+    ground_truth:
+      type: rubric
+      expected_files:
+        - src/background_indexer.rs
+        - src/cli/index.rs
+        - src/cli/query.rs
+        - src/cli/serve.rs
+        - src/cli/watch.rs
+        - src/indexer.rs
+        - src/interactive/app.rs
+        - src/mcp.rs
+        - src/pulse/wiki.rs
+        - src/query/mod.rs
+        - src/query/result.rs
+        - src/semantic/agentic.rs
+        - src/semantic/executor.rs
+        - src/semantic/tools.rs
+        - src/watcher.rs
+      required_facts:
+        - "depth-1 (direct importers of crate::content_store): background_indexer.rs, cli/query.rs, indexer.rs, query/mod.rs, query/result.rs — 5 files"
+        - "depth-2 via indexer.rs: cli/index.rs, cli/serve.rs, cli/watch.rs, interactive/app.rs, mcp.rs, semantic/agentic.rs, watcher.rs"
+        - "depth-2 via query/mod.rs: cli/serve.rs, interactive/app.rs, mcp.rs, pulse/wiki.rs, semantic/executor.rs, semantic/tools.rs"
+        - "combined unique set has 15 files"
+    oracle_notes: >-
+      Pre-computed via manual grep analysis on corpus@d2935f48 (REF-225 spec):
+      (1) `grep -rnl "crate::content_store" src/` → 5 direct deps;
+      (2) `grep -rnl "crate::indexer\b" src/` → 8 files, `grep -rnl "crate::query\b" src/`
+      → 7 files, `grep -rnl "crate::background_indexer\b" src/` → 2 files; union = 15
+      total. Grep gate: `grep -rnl "crate::content_store" src/` gives 5 direct deps —
+      NOT the 15-file transitive set — agent must recursively follow the chain across
+      at least 3 more grep rounds. Arm-A requires >= 5 turns minimum.
+
+  - id: reflex-trans-regex-trigrams
+    repo: reflex
+    repo_sha: d2935f48f5abea2a76b479040a23478155be9bb0
+    category: reverse_dependency
+    expect_reflex: win
+    prompt: >-
+      Which source files in the Reflex `src/` tree transitively depend on the
+      `regex_trigrams` module? List (a) every file that directly imports
+      `crate::regex_trigrams` (depth-1), and (b) every file that imports any
+      depth-1 module in turn (depth-2). Report the combined set.
+    ground_truth:
+      type: rubric
+      expected_files:
+        - src/cli/query.rs
+        - src/cli/serve.rs
+        - src/interactive/app.rs
+        - src/mcp.rs
+        - src/pulse/wiki.rs
+        - src/query/mod.rs
+        - src/semantic/executor.rs
+        - src/semantic/tools.rs
+      required_facts:
+        - "depth-1 (direct importers of crate::regex_trigrams): only src/query/mod.rs — 1 file"
+        - "depth-2 via query/mod.rs (crate::query importers): cli/query.rs, cli/serve.rs, interactive/app.rs, mcp.rs, pulse/wiki.rs, semantic/executor.rs, semantic/tools.rs — 7 files"
+        - "combined set: 8 files total"
+    oracle_notes: >-
+      Pre-computed via manual grep analysis on corpus@d2935f48 (REF-225 spec):
+      (1) `grep -rnl "crate::regex_trigrams" src/` → 1 file (query/mod.rs);
+      (2) `grep -rnl "crate::query\b" src/` → 7 files. Grep gate: bare grep finds
+      only query/mod.rs as direct user — misses the 7-file depth-2 set entirely.
+      Agent must follow at least 2 recursive grep rounds + aggregation = >= 4 turns.
+
+  # ── Category: cross_module ───────────────────────────────────────────────────
+
+  - id: reflex-cm-language-dispatch
+    repo: reflex
+    repo_sha: d2935f48f5abea2a76b479040a23478155be9bb0
+    category: cross_module
+    expect_reflex: win
+    prompt: >-
+      The `Language` enum in `src/models.rs` has 16 variants (Rust, Python,
+      TypeScript, etc.). For each variant, identify: (a) which source file under
+      `src/parsers/` contains the `extract_symbols()` implementation for that
+      language, and (b) which line in `src/parsers/mod.rs` dispatches to that
+      implementation. Produce a mapping: Language variant → implementing file →
+      dispatch location in parsers/mod.rs.
+    ground_truth:
+      type: rubric
+      expected_files:
+        - src/models.rs
+        - src/parsers/mod.rs
+        - src/parsers/rust.rs
+        - src/parsers/python.rs
+        - src/parsers/typescript.rs
+        - src/parsers/go.rs
+        - src/parsers/java.rs
+        - src/parsers/c.rs
+        - src/parsers/cpp.rs
+        - src/parsers/csharp.rs
+        - src/parsers/php.rs
+        - src/parsers/ruby.rs
+        - src/parsers/kotlin.rs
+        - src/parsers/zig.rs
+        - src/parsers/swift.rs
+        - src/parsers/vue.rs
+        - src/parsers/svelte.rs
+      required_facts:
+        - "each of the 15-16 Language variants (Swift may be disabled) maps to a src/parsers/<lang>.rs file"
+        - "each parser file defines a private fn extract_symbols() that returns Vec<SearchResult>"
+        - "src/parsers/mod.rs contains a match on Language that dispatches to each module's parse() or extract_symbols()"
+        - "the dispatch is a single match expression, typically around lines 200-230 of parsers/mod.rs"
+    oracle_notes: >-
+      Verified in corpus@d2935f48: (1) src/models.rs has Language enum;
+      (2) ls src/parsers/ lists 15 lang files + mod.rs + tsconfig.rs;
+      (3) `grep -n "fn extract_symbols" src/parsers/` returns 15 definitions;
+      (4) parsers/mod.rs ~lines 217-228 has the dispatch match. Grep gate:
+      `grep -rnw "extract_symbols"` finds definitions BUT does NOT produce the
+      variant→file→dispatch-line mapping — agent must read parsers/mod.rs and
+      correlate variant names across files. Arm-A requires >= 5 turns.
+
+  - id: ripgrep-cm-printer-chain
+    repo: ripgrep
+    repo_sha: 4649aa9700619f94cf9c66876e9549d83420e16c
+    category: cross_module
+    expect_reflex: win
+    prompt: >-
+      In ripgrep, three concrete printer types are available: Standard, JSON, and
+      Summary. For each printer type: (a) which source file defines its struct,
+      (b) where in `crates/core/search.rs` is it instantiated (the match arm or
+      function call), and (c) what method does the search worker call on it to
+      print a match? Report file and approximate line for each answer.
+    ground_truth:
+      type: rubric
+      expected_files:
+        - crates/printer/src/standard.rs
+        - crates/printer/src/json.rs
+        - crates/printer/src/summary.rs
+        - crates/core/search.rs
+      required_facts:
+        - "StandardPrinter (or StandardBuilder) is defined in crates/printer/src/standard.rs"
+        - "JSON printer (JsonPrinter or similar) is defined in crates/printer/src/json.rs"
+        - "SummaryPrinter is defined in crates/printer/src/summary.rs"
+        - "crates/core/search.rs instantiates the correct printer based on the output mode (SearchMode or similar flag)"
+        - "each printer type implements a shared Sink-compatible interface so the Searcher can call print_stats or matched()/sink methods"
+    oracle_notes: >-
+      Verified in corpus@4649aa97: standard.rs, json.rs, summary.rs exist in printer/;
+      crates/core/search.rs (search.rs) dispatches to printer types. Grep gate:
+      `grep -rnw "Printer" crates/` returns many hits but does NOT map each type to
+      its definition file AND its usage in search.rs AND its method name. Agent must
+      read 4+ files. Arm-A requires >= 4 turns.
+
+  - id: ripgrep-cm-stats-tracking
+    repo: ripgrep
+    repo_sha: 4649aa9700619f94cf9c66876e9549d83420e16c
+    category: cross_module
+    expect_reflex: win
+    prompt: >-
+      In ripgrep, where are search statistics (match count, byte count, elapsed
+      time) accumulated, and where are they printed to output? Identify: (a) the
+      struct that holds the counters, (b) the file that defines it, (c) where in
+      the codebase stats are updated per match, and (d) where they are printed at
+      the end of a search run.
+    ground_truth:
+      type: rubric
+      expected_files:
+        - crates/printer/src/stats.rs
+        - crates/printer/src/standard.rs
+        - crates/printer/src/summary.rs
+      required_facts:
+        - "Stats struct in crates/printer/src/stats.rs accumulates match counts, byte counts, and timing"
+        - "stats are updated per match via the printer's Sink implementation (matched() callback)"
+        - "StandardPrinter and/or SummaryPrinter in their respective src files print the stats block"
+        - "stats printing occurs at the end of a file or overall run (print_stats or finish call)"
+    oracle_notes: >-
+      Verified in corpus@4649aa97: stats.rs exists in printer/src/; standard.rs and
+      summary.rs are the printing sites. Grep gate: `grep -rnw "Stats" crates/printer/`
+      returns hits in stats.rs and its users, but does NOT identify the update site
+      vs print site distinction or which printers print stats. Agent must read
+      stats.rs + at least one printer file. Arm-A requires >= 4 turns.
+
+  - id: tokio-cm-spawn-chain
+    repo: tokio
+    repo_sha: ab3ff69cf2258a8c696b2dca89a2cef4ff114c1c
+    category: cross_module
+    expect_reflex: win
+    prompt: >-
+      Trace the call chain when `tokio::spawn()` is called in user code. Starting
+      from `task::spawn()` in `tokio/src/task/spawn.rs`, identify each function
+      invoked before the new task appears in a worker's local queue, ready to be
+      scheduled. Give file and function name for each step in the chain.
+    ground_truth:
+      type: rubric
+      expected_files:
+        - tokio/src/task/spawn.rs
+        - tokio/src/runtime/context.rs
+        - tokio/src/runtime/task/mod.rs
+      required_facts:
+        - "task::spawn() in tokio/src/task/spawn.rs calls context::with_current(|handle| handle.spawn(...))"
+        - "runtime/context.rs provides the current runtime handle"
+        - "the handle's spawn() method (in the scheduler handle or runtime handle) creates a raw task and schedules it"
+        - "the raw task is pushed to the local worker queue or the global inject queue"
+    oracle_notes: >-
+      Verified in corpus@ab3ff69c: task/spawn.rs line 202 calls
+      context::with_current(|handle| handle.spawn(...)); context.rs provides the
+      handle. Grep gate: `grep -rnw "fn spawn" tokio/src/` returns 20+ hits across
+      many files — does NOT trace the exact chain from user-facing spawn() through
+      context lookup to queue insertion. Agent must follow the chain across 3+ files.
+      Arm-A requires >= 4 turns.

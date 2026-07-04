@@ -125,7 +125,7 @@ fn parse_symbol_kind(kind: Option<String>) -> Option<SymbolKind> {
 /// Handle initialize request
 fn handle_initialize(_params: Option<Value>) -> Result<Value> {
     Ok(json!({
-        "protocolVersion": "2024-11-05",
+        "protocolVersion": "2025-11-25",
         "capabilities": {
             "tools": {}
         },
@@ -246,7 +246,7 @@ fn handle_list_tools(_params: Option<Value>, enable_structural: bool) -> Result<
             },
             {
                 "name": "search_code",
-                "description": "Comprehensive full-codebase search — equivalent to `grep -rn`. Returns ALL occurrences across every indexed file in a single call. Do NOT chain multiple search_code calls for the same pattern — one call is already exhaustive. Use mode=\"count\" to get just the match count before deciding whether to paginate.\n\n**Search modes:**\n- Full-text (default): Finds ALL occurrences — definitions + usages\n- Symbol-only (symbols=true): Finds ONLY definitions where symbols are declared\n\n**When to use search_regex instead:**\n- Patterns with special characters: -> :: () [] {} . * + ? \\\\ | ^ $\n- Complex pattern matching: wildcards, alternation, anchors\n- Examples: '->with(', '::new', 'function*', '[derive]', 'fn (get|set)_.*'\n\n**Use this for:**\n- Simple text patterns (alphanumeric, underscores, hyphens)\n- Detailed analysis with line numbers and code previews\n- Symbol definition searches\n\n**Count mode:** Pass mode=\"count\" to get {\"count\": N, \"pattern\": \"...\"} with no match bodies. Faster than list mode — use this to check cardinality before paginating.\n\n**Pagination:** Check response.pagination.has_more. If true, use offset parameter to fetch next page.\n\n**Error Handling:** If you receive an error message containing \"Index not found\" or \"stale\", immediately call the index_project tool, wait for it to complete, then retry this operation.",
+                "description": "Comprehensive full-codebase search — equivalent to `grep -rn`. Returns ALL occurrences across every indexed file in a single call. Do NOT chain multiple search_code calls for the same pattern — one call is already exhaustive. Use mode=\"count\" to get just the match count before deciding whether to paginate.\n\n**Search modes:**\n- Full-text (default): Finds ALL occurrences — definitions + usages\n- Symbol-only (symbols=true): Finds ONLY definitions where symbols are declared\n\n**When to use search_regex instead:**\n- Patterns with special characters: -> :: () [] {} . * + ? \\\\ | ^ $\n- Complex pattern matching: wildcards, alternation, anchors\n- Examples: '->with(', '::new', 'function*', '[derive]', 'fn (get|set)_.*'\n\n**Use this for:**\n- Simple text patterns (alphanumeric, underscores, hyphens)\n- Detailed analysis with line numbers and code previews\n- Symbol definition searches\n\n**Count mode:** Pass mode=\"count\" to get {\"count\": N, \"pattern\": \"...\"} with no match bodies. Faster than list mode — use this to check cardinality before paginating.\n\n**Result shape (list mode):** Results are columnar to save tokens: {\"columns\": [...], \"rows\": [[...]]}. Each row is one match with values positionally aligned to `columns` (always path, language, start_line, end_line, preview; then kind/symbol/context when present). Read `columns` to map positions. Set env REFLEX_MCP_COLUMNAR=0 to restore the legacy results[] object shape.\n\n**Pagination:** Check response.pagination.has_more. If true, use offset parameter to fetch next page.\n\n**Error Handling:** If you receive an error message containing \"Index not found\" or \"stale\", immediately call the index_project tool, wait for it to complete, then retry this operation.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -323,7 +323,7 @@ fn handle_list_tools(_params: Option<Value>, enable_structural: bool) -> Result<
             },
             {
                 "name": "search_regex",
-                "description": "Regex-based code search for complex pattern matching (e.g., 'fn (get|set)_\\\\w+').\n\n**Use for:**\n- Patterns with special characters: -> :: () [] {} . * + ? \\\\ | ^ $\n- Pattern matching: wildcards (.*), alternation (a|b), anchors (^$)\n- Complex searches: case-insensitive variants, word boundaries\n\n**Common examples:**\n- Method calls: '->with\\\\(', '->map\\\\(', '::new\\\\('\n- Operators: '->', '::', '||', '&&'\n- Functions: 'fn (get|set)_\\\\\\\\w+' (getter/setter functions)\n- Attributes: '\\\\\\\\[(derive|test)\\\\\\\\]' (Rust attributes)\n\n**Escaping rules:**\n- Must escape: ( ) [ ] { } . * + ? \\\\ | ^ $\n- No escaping needed: -> :: - _ / = < >\n- Use double backslash in JSON: \\\\\\\\( \\\\\\\\) \\\\\\\\[ \\\\\\\\]\n\n**Count mode:** Pass mode=\"count\" to get {\"count\": N, \"pattern\": \"...\"} with no match bodies — faster than list mode.\n\n**Error Handling:** If you receive an error message containing \"Index not found\" or \"stale\", immediately call the index_project tool, wait for it to complete, then retry this operation.\n\n**Don't use for:**\n- Simple text searches (use search_code instead - faster)\n- Symbol definitions (use search_code with symbols=true instead)",
+                "description": "Regex-based code search for complex pattern matching (e.g., 'fn (get|set)_\\\\w+').\n\n**Use for:**\n- Patterns with special characters: -> :: () [] {} . * + ? \\\\ | ^ $\n- Pattern matching: wildcards (.*), alternation (a|b), anchors (^$)\n- Complex searches: case-insensitive variants, word boundaries\n\n**Common examples:**\n- Method calls: '->with\\\\(', '->map\\\\(', '::new\\\\('\n- Operators: '->', '::', '||', '&&'\n- Functions: 'fn (get|set)_\\\\\\\\w+' (getter/setter functions)\n- Attributes: '\\\\\\\\[(derive|test)\\\\\\\\]' (Rust attributes)\n\n**Escaping rules:**\n- Must escape: ( ) [ ] { } . * + ? \\\\ | ^ $\n- No escaping needed: -> :: - _ / = < >\n- Use double backslash in JSON: \\\\\\\\( \\\\\\\\) \\\\\\\\[ \\\\\\\\]\n\n**Count mode:** Pass mode=\"count\" to get {\"count\": N, \"pattern\": \"...\"} with no match bodies — faster than list mode.\n\n**Result shape (list mode):** Results are columnar to save tokens: {\"columns\": [...], \"rows\": [[...]]}. Each row is one match with values positionally aligned to `columns` (always path, language, start_line, end_line, preview; then kind/symbol/context when present). Read `columns` to map positions. Set env REFLEX_MCP_COLUMNAR=0 to restore the legacy results[] object shape.\n\n**Error Handling:** If you receive an error message containing \"Index not found\" or \"stale\", immediately call the index_project tool, wait for it to complete, then retry this operation.\n\n**Don't use for:**\n- Simple text searches (use search_code instead - faster)\n- Symbol definitions (use search_code with symbols=true instead)",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -724,6 +724,198 @@ fn handle_list_tools(_params: Option<Value>, enable_structural: bool) -> Result<
 }
 
 /// Handle tools/call request
+/// Build a successful MCP `tools/call` result.
+///
+/// REF-215: Reflex emits only the spec-guaranteed `content[text]` baseline — the
+/// result data serialized as a JSON string. The spec-optional `structuredContent`
+/// field (REF-202) was dropped per the REF-196 board decision: every conforming
+/// MCP client must handle `content[text]`, it is what reaches the model in
+/// Reflex's primary Claude Code use case, and emitting a single field removes any
+/// chance of a client consuming both and double-counting tokens. The columnar
+/// `{columns, rows}` shape (REF-209) is independent and still lives inside this
+/// text payload.
+///
+/// Only success paths use this — error results are surfaced through the JSON-RPC
+/// error channel in `process_request`, never as a tool result, so there are no
+/// `isError` responses to preserve here.
+fn make_tool_result(data: Value) -> Value {
+    json!({
+        "content": [{"type": "text", "text": serde_json::to_string(&data).unwrap_or_default()}]
+    })
+}
+
+/// REF-209: columnar result-format toggle for `search_code` / `search_regex`.
+///
+/// Default ON. Returns `false` only when `REFLEX_MCP_COLUMNAR` is explicitly set
+/// to a falsey value (`0`/`false`/`off`/`no`, case-insensitive), which restores
+/// the legacy file-grouped `results` array for backwards compatibility. The
+/// emitted payload (`to_columnar`) consults this to decide the shape.
+fn columnar_enabled() -> bool {
+    match std::env::var("REFLEX_MCP_COLUMNAR") {
+        Ok(v) => !matches!(
+            v.trim().to_ascii_lowercase().as_str(),
+            "0" | "false" | "off" | "no"
+        ),
+        Err(_) => true,
+    }
+}
+
+/// REF-212: render a bool as a compact on/off token for the startup diagnostic.
+fn onoff(v: bool) -> &'static str {
+    if v { "on" } else { "off" }
+}
+
+/// REF-212: one-line startup diagnostic summarising the flags the MCP server
+/// resolved from its environment, plus build provenance.
+///
+/// Emitted to **stderr** at startup (never stdout, which carries the JSON-RPC
+/// stream). Claude Code captures an MCP server's stderr into its per-session
+/// `mcp-logs-<server>/` files, so this line is the ground-truth record of which
+/// `columnar` / structural behaviour a given trial actually ran with.
+///
+/// It exists specifically to catch the failure mode behind [REF-212]: an env
+/// toggle that *was* forwarded to the process but was not honoured because the
+/// running binary predated the code that reads it. The reported flags reflect
+/// what THIS binary actually resolved, and `build=` names the commit it was
+/// compiled from — so a benchmark run against an out-of-date rfx is obvious
+/// rather than silently corrupting results.
+///
+/// REF-215 removed the `structuredContent` / `sc_stage2` flags along with the
+/// env vars that drove them.
+fn startup_flags_line(columnar: bool, structural: bool) -> String {
+    format!(
+        "reflex-mcp startup: version={} build={} columnar={} structural_tools={}",
+        env!("CARGO_PKG_VERSION"),
+        option_env!("REFLEX_GIT_SHA").unwrap_or("unknown"),
+        onoff(columnar),
+        onoff(structural),
+    )
+}
+
+/// REF-209: reshape a search response's file-grouped `results` array into a
+/// columnar `{ columns, rows }` pair to cut key-repetition token cost.
+///
+/// One row is emitted per match; `path`/`language` (and any file-level
+/// `dependencies`) repeat per row so each row is self-contained and needs no
+/// back-reference. Columns are emitted dynamically: the five always-present
+/// fields (`path`, `language`, `start_line`, `end_line`, `preview`) plus any
+/// optional field (`kind`, `symbol`, `context_before`, `context_after`,
+/// `dependencies`) that at least one match/file actually carries — so the common
+/// full-text case stays at five columns with no all-`null` padding.
+///
+/// Objects without a `results` array (count-mode `{count, pattern}`, error
+/// shapes) are returned unchanged, so this is safe to call on any success value.
+fn to_columnar(mut value: Value) -> Value {
+    // Only transform success objects that carry a `results` array.
+    if !value.get("results").map(Value::is_array).unwrap_or(false) {
+        return value;
+    }
+    let obj = value
+        .as_object_mut()
+        .expect("value has a `results` member, so it is an object");
+    let results = match obj.remove("results") {
+        Some(Value::Array(results)) => results,
+        // Unreachable given the guard above, but stay total rather than panic.
+        other => {
+            if let Some(other) = other {
+                obj.insert("results".to_string(), other);
+            }
+            return value;
+        }
+    };
+
+    // Pass 1: decide which optional columns any row needs.
+    let mut has_kind = false;
+    let mut has_symbol = false;
+    let mut has_ctx_before = false;
+    let mut has_ctx_after = false;
+    let mut has_deps = false;
+    for file in &results {
+        if file.get("dependencies").is_some() {
+            has_deps = true;
+        }
+        if let Some(matches) = file.get("matches").and_then(Value::as_array) {
+            for m in matches {
+                has_kind |= m.get("kind").is_some();
+                has_symbol |= m.get("symbol").is_some();
+                has_ctx_before |= m.get("context_before").is_some();
+                has_ctx_after |= m.get("context_after").is_some();
+            }
+        }
+    }
+
+    // Fixed base columns; optional ones appended only when present, in a stable
+    // order so `columns[i]` is deterministic for a given result set.
+    let mut columns: Vec<&'static str> =
+        vec!["path", "language", "start_line", "end_line", "preview"];
+    if has_kind {
+        columns.push("kind");
+    }
+    if has_symbol {
+        columns.push("symbol");
+    }
+    if has_ctx_before {
+        columns.push("context_before");
+    }
+    if has_ctx_after {
+        columns.push("context_after");
+    }
+    if has_deps {
+        columns.push("dependencies");
+    }
+
+    // Pass 2: project each match into a positional row aligned to `columns`.
+    let mut rows: Vec<Value> = Vec::new();
+    for file in &results {
+        let path = file.get("path").cloned().unwrap_or(Value::Null);
+        let language = file.get("language").cloned().unwrap_or(Value::Null);
+        let deps = file.get("dependencies").cloned().unwrap_or(Value::Null);
+        let Some(matches) = file.get("matches").and_then(Value::as_array) else {
+            continue;
+        };
+        for m in matches {
+            let span = m.get("span");
+            let start_line = span
+                .and_then(|s| s.get("start_line"))
+                .cloned()
+                .unwrap_or(Value::Null);
+            let end_line = span
+                .and_then(|s| s.get("end_line"))
+                .cloned()
+                .unwrap_or(Value::Null);
+            let preview = m.get("preview").cloned().unwrap_or(Value::Null);
+
+            let mut row: Vec<Value> = vec![
+                path.clone(),
+                language.clone(),
+                start_line,
+                end_line,
+                preview,
+            ];
+            if has_kind {
+                row.push(m.get("kind").cloned().unwrap_or(Value::Null));
+            }
+            if has_symbol {
+                row.push(m.get("symbol").cloned().unwrap_or(Value::Null));
+            }
+            if has_ctx_before {
+                row.push(m.get("context_before").cloned().unwrap_or(Value::Null));
+            }
+            if has_ctx_after {
+                row.push(m.get("context_after").cloned().unwrap_or(Value::Null));
+            }
+            if has_deps {
+                row.push(deps.clone());
+            }
+            rows.push(Value::Array(row));
+        }
+    }
+
+    obj.insert("columns".to_string(), json!(columns));
+    obj.insert("rows".to_string(), Value::Array(rows));
+    value
+}
+
 fn handle_call_tool(params: Option<Value>) -> Result<Value> {
     let params = params.ok_or_else(|| anyhow::anyhow!("Missing params for tools/call"))?;
 
@@ -811,12 +1003,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 "locations": locations
             });
 
-            Ok(json!({
-                "content": [{
-                    "type": "text",
-                    "text": serde_json::to_string(&compact_response)?
-                }]
-            }))
+            Ok(make_tool_result(compact_response))
         }
         "count_occurrences" => {
             // Quick stats tool (minimal token usage)
@@ -891,12 +1078,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 "files": unique_files.len()
             });
 
-            Ok(json!({
-                "content": [{
-                    "type": "text",
-                    "text": serde_json::to_string(&stats)?
-                }]
-            }))
+            Ok(make_tool_result(stats))
         }
         "search_code" => {
             let pattern = arguments["pattern"]
@@ -997,9 +1179,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 let engine = QueryEngine::new(cache);
                 let response = engine.search_with_metadata(&pattern, count_filter)?;
                 let result = json!({"count": response.pagination.total, "pattern": pattern});
-                return Ok(
-                    json!({"content": [{"type": "text", "text": serde_json::to_string(&result)?}]}),
-                );
+                return Ok(make_tool_result(result));
             }
 
             let filter = QueryFilter {
@@ -1071,12 +1251,13 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 map.insert("returned_count".to_string(), json!(result_count));
             }
 
-            Ok(json!({
-                "content": [{
-                    "type": "text",
-                    "text": serde_json::to_string(&response_val)?
-                }]
-            }))
+            // REF-209: emit the token-efficient columnar shape by default; the
+            // env toggle restores the legacy results[] array for compatibility.
+            if columnar_enabled() {
+                response_val = to_columnar(response_val);
+            }
+
+            Ok(make_tool_result(response_val))
         }
         "search_regex" => {
             let pattern = arguments["pattern"]
@@ -1148,9 +1329,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 let engine = QueryEngine::new(cache);
                 let response = engine.search_with_metadata(&pattern, count_filter)?;
                 let result = json!({"count": response.pagination.total, "pattern": pattern});
-                return Ok(
-                    json!({"content": [{"type": "text", "text": serde_json::to_string(&result)?}]}),
-                );
+                return Ok(make_tool_result(result));
             }
 
             let filter = QueryFilter {
@@ -1215,12 +1394,13 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 map.insert("returned_count".to_string(), json!(result_count));
             }
 
-            Ok(json!({
-                "content": [{
-                    "type": "text",
-                    "text": serde_json::to_string(&response_val)?
-                }]
-            }))
+            // REF-209: emit the token-efficient columnar shape by default; the
+            // env toggle restores the legacy results[] array for compatibility.
+            if columnar_enabled() {
+                response_val = to_columnar(response_val);
+            }
+
+            Ok(make_tool_result(response_val))
         }
         "search_ast" => {
             // AST pattern (Tree-sitter S-expression)
@@ -1315,12 +1495,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                     crate::cli::truncate_preview(&result.preview, DEFAULT_MCP_PREVIEW_LENGTH);
             }
 
-            Ok(json!({
-                "content": [{
-                    "type": "text",
-                    "text": serde_json::to_string(&results)?
-                }]
-            }))
+            Ok(make_tool_result(serde_json::to_value(&results)?))
         }
         "index_project" => {
             let force = arguments["force"].as_bool();
@@ -1352,12 +1527,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
             let path = PathBuf::from(".");
             let stats = indexer.index(&path, false)?;
 
-            Ok(json!({
-                "content": [{
-                    "type": "text",
-                    "text": serde_json::to_string(&stats)?
-                }]
-            }))
+            Ok(make_tool_result(serde_json::to_value(&stats)?))
         }
         "get_dependencies" => {
             let path = arguments["path"]
@@ -1375,12 +1545,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
 
             let dependencies = deps_index.get_dependencies_info(file_id)?;
 
-            Ok(json!({
-                "content": [{
-                    "type": "text",
-                    "text": serde_json::to_string(&dependencies)?
-                }]
-            }))
+            Ok(make_tool_result(serde_json::to_value(&dependencies)?))
         }
         "get_dependents" => {
             let path = arguments["path"]
@@ -1405,12 +1570,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 .filter_map(|id| paths.get(id).cloned())
                 .collect();
 
-            Ok(json!({
-                "content": [{
-                    "type": "text",
-                    "text": serde_json::to_string(&path_list)?
-                }]
-            }))
+            Ok(make_tool_result(serde_json::to_value(&path_list)?))
         }
         "get_transitive_deps" => {
             let path = arguments["path"]
@@ -1447,12 +1607,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 })
                 .collect();
 
-            Ok(json!({
-                "content": [{
-                    "type": "text",
-                    "text": serde_json::to_string(&result)?
-                }]
-            }))
+            Ok(make_tool_result(serde_json::to_value(&result)?))
         }
         "find_hotspots" => {
             let limit = arguments["limit"].as_u64().map(|n| n as usize);
@@ -1529,12 +1684,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 "results": results,
             });
 
-            Ok(json!({
-                "content": [{
-                    "type": "text",
-                    "text": serde_json::to_string(&response)?
-                }]
-            }))
+            Ok(make_tool_result(response))
         }
         "find_circular" => {
             let limit = arguments["limit"].as_u64().map(|n| n as usize);
@@ -1606,12 +1756,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 "results": results,
             });
 
-            Ok(json!({
-                "content": [{
-                    "type": "text",
-                    "text": serde_json::to_string(&response)?
-                }]
-            }))
+            Ok(make_tool_result(response))
         }
         "find_unused" => {
             let limit = arguments["limit"].as_u64().map(|n| n as usize);
@@ -1654,12 +1799,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 "results": results,
             });
 
-            Ok(json!({
-                "content": [{
-                    "type": "text",
-                    "text": serde_json::to_string(&response)?
-                }]
-            }))
+            Ok(make_tool_result(response))
         }
         "find_islands" => {
             let limit = arguments["limit"].as_u64().map(|n| n as usize);
@@ -1768,12 +1908,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 "results": results,
             });
 
-            Ok(json!({
-                "content": [{
-                    "type": "text",
-                    "text": serde_json::to_string(&response)?
-                }]
-            }))
+            Ok(make_tool_result(response))
         }
         "analyze_summary" => {
             let min_dependents = arguments["min_dependents"]
@@ -1797,12 +1932,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 "min_dependents": min_dependents,
             });
 
-            Ok(json!({
-                "content": [{
-                    "type": "text",
-                    "text": serde_json::to_string(&summary)?
-                }]
-            }))
+            Ok(make_tool_result(summary))
         }
         "gather_context" => {
             // Parse optional parameters
@@ -1847,12 +1977,18 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 ""
             };
 
-            Ok(json!({
+            // gather_context returns human-readable prose, not JSON. Running it
+            // through make_tool_result would JSON-encode (quote + escape) the text
+            // and change content[text]; instead keep content[text] as the raw
+            // string (REF-215: content[text] only, no structuredContent).
+            let context_text = format!("{}{}", context, hint);
+            let result = json!({
                 "content": [{
                     "type": "text",
-                    "text": format!("{}{}", context, hint)
+                    "text": context_text
                 }]
-            }))
+            });
+            Ok(result)
         }
         "check_index_status" => {
             let cache = CacheManager::new(".");
@@ -1862,12 +1998,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                     "status": "missing",
                     "action_required": "rfx index"
                 });
-                return Ok(json!({
-                    "content": [{
-                        "type": "text",
-                        "text": serde_json::to_string(&result)?
-                    }]
-                }));
+                return Ok(make_tool_result(result));
             }
 
             let engine = QueryEngine::new(cache);
@@ -1892,12 +2023,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 json!({ "status": status_str })
             };
 
-            Ok(json!({
-                "content": [{
-                    "type": "text",
-                    "text": serde_json::to_string(&result)?
-                }]
-            }))
+            Ok(make_tool_result(result))
         }
         "find_references" => {
             let pattern = arguments["pattern"]
@@ -1960,9 +2086,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 let engine = QueryEngine::new(cache);
                 let response = engine.search_with_metadata(&pattern, count_filter)?;
                 let result = json!({"count": response.pagination.total, "pattern": pattern});
-                return Ok(
-                    json!({"content": [{"type": "text", "text": serde_json::to_string(&result)?}]}),
-                );
+                return Ok(make_tool_result(result));
             }
 
             // Search 1: Find symbol definition (symbols_mode=true, small cap)
@@ -2073,12 +2197,7 @@ fn handle_call_tool(params: Option<Value>) -> Result<Value> {
                 "pagination": ref_response.pagination,
             });
 
-            Ok(json!({
-                "content": [{
-                    "type": "text",
-                    "text": serde_json::to_string(&response)?
-                }]
-            }))
+            Ok(make_tool_result(response))
         }
         _ => Err(anyhow::anyhow!("Unknown tool: {}", name)),
     }
@@ -2171,6 +2290,15 @@ fn run_mcp_server_io_impl<R: BufRead, W: Write>(
     enable_structural: bool,
 ) -> Result<()> {
     log::info!("Starting Reflex MCP server on stdio");
+
+    // REF-212: unconditional stderr diagnostic (NOT gated behind RUST_LOG) so the
+    // resolved runtime flags are always captured in Claude Code's mcp-logs. This
+    // is the verification hook for efficacy trials: it proves which behaviour the
+    // running binary actually honoured and pins the exact build it came from.
+    eprintln!(
+        "{}",
+        startup_flags_line(columnar_enabled(), enable_structural)
+    );
 
     for line in reader.lines() {
         let line = line?;
@@ -2309,8 +2437,244 @@ mod tests {
         );
 
         // Pre-existing handshake fields must be unchanged.
-        assert_eq!(resp["result"]["protocolVersion"], "2024-11-05");
+        assert_eq!(resp["result"]["protocolVersion"], "2025-11-25");
         assert_eq!(resp["result"]["serverInfo"]["name"], "reflex");
+    }
+
+    // REF-215: make_tool_result must emit ONLY the spec-guaranteed content[text]
+    // JSON string — no structuredContent key. Dropped per the REF-196 board
+    // decision so no client can consume both fields and double-count tokens.
+    #[test]
+    fn test_make_tool_result_content_text_only() {
+        let data = json!({"status": "fresh", "count": 3});
+        let result = super::make_tool_result(data.clone());
+
+        // No structuredContent key anywhere in the result.
+        assert!(
+            result.get("structuredContent").is_none(),
+            "make_tool_result must not emit structuredContent (REF-215): {result}"
+        );
+
+        // content[text] is the data serialized as a JSON string and round-trips
+        // back to the original object.
+        assert_eq!(result["content"][0]["type"], "text");
+        let text = result["content"][0]["text"]
+            .as_str()
+            .expect("content[0].text must be a string");
+        let roundtrip: serde_json::Value =
+            serde_json::from_str(text).expect("content[text] must be valid JSON");
+        assert_eq!(roundtrip, data);
+
+        // The result object carries exactly the `content` key and nothing else,
+        // so the tool-result shape is strictly content[text]-only.
+        assert_eq!(
+            result.as_object().map(|o| o.len()),
+            Some(1),
+            "result must contain only the `content` key: {result}"
+        );
+    }
+
+    // REF-209: columnar output is the shipped default unless a caller opts out.
+    #[test]
+    fn test_columnar_enabled_default_on() {
+        // Relies on REFLEX_MCP_COLUMNAR being unset in the harness environment.
+        assert!(super::columnar_enabled());
+    }
+
+    // REF-212: the startup diagnostic must faithfully report every resolved flag
+    // plus build provenance, so a stale binary or an un-honoured env toggle is
+    // visible in Claude Code's mcp-logs for any trial.
+    #[test]
+    fn test_startup_flags_line_reports_resolved_flags() {
+        // REF-215: only columnar + structural_tools remain (structuredContent /
+        // sc_stage2 were removed along with the env vars that drove them).
+        let line = super::startup_flags_line(false, true);
+        assert!(line.starts_with("reflex-mcp startup:"), "line: {line}");
+        assert!(line.contains("columnar=off"), "line: {line}");
+        assert!(line.contains("structural_tools=on"), "line: {line}");
+        // Build provenance present so an out-of-date rfx is identifiable.
+        assert!(line.contains("build="), "line: {line}");
+        // The removed flags must not reappear in the diagnostic.
+        assert!(!line.contains("structuredContent"), "line: {line}");
+        assert!(!line.contains("sc_stage2"), "line: {line}");
+
+        // Inverting every flag flips exactly the on/off tokens.
+        let off = super::startup_flags_line(true, false);
+        assert!(off.contains("columnar=on"), "line: {off}");
+        assert!(off.contains("structural_tools=off"), "line: {off}");
+    }
+
+    /// A representative two-file list-mode search response (post-flattening),
+    /// mixing a symbol match and a plain-text match.
+    fn sample_search_response() -> serde_json::Value {
+        json!({
+            "status": "fresh",
+            "pagination": {"total": 2, "count": 2, "offset": 0, "limit": 200, "has_more": false},
+            "results": [
+                {
+                    "path": "src/mcp.rs",
+                    "language": "rust",
+                    "matches": [
+                        {"kind": "Function", "symbol": "make_tool_result",
+                         "span": {"start_line": 955, "end_line": 957}, "preview": "fn make_tool_result"}
+                    ]
+                },
+                {
+                    "path": "src/query.rs",
+                    "language": "rust",
+                    "matches": [
+                        {"span": {"start_line": 10, "end_line": 10}, "preview": "let x = 1;"},
+                        {"span": {"start_line": 20, "end_line": 20}, "preview": "let y = 2;"}
+                    ]
+                }
+            ],
+            "total_count": 2,
+            "returned_count": 2,
+            "has_more": false
+        })
+    }
+
+    // REF-209: `results` array is replaced by columns/rows; one row per match.
+    #[test]
+    fn test_to_columnar_reshapes_results() {
+        let out = super::to_columnar(sample_search_response());
+
+        // `results` is gone, replaced by `columns` + `rows`.
+        assert!(out.get("results").is_none(), "results must be removed");
+        let columns = out["columns"].as_array().expect("columns array");
+        let rows = out["rows"].as_array().expect("rows array");
+
+        // The five base columns always lead; kind/symbol appended because one
+        // match carries them. No context columns (none present).
+        let col_names: Vec<&str> = columns.iter().filter_map(|c| c.as_str()).collect();
+        assert_eq!(
+            col_names,
+            vec![
+                "path",
+                "language",
+                "start_line",
+                "end_line",
+                "preview",
+                "kind",
+                "symbol"
+            ]
+        );
+
+        // One row per match across all files (1 + 2 = 3).
+        assert_eq!(rows.len(), 3);
+
+        // Symbol row is fully populated and positionally aligned to columns.
+        assert_eq!(
+            rows[0],
+            json!([
+                "src/mcp.rs",
+                "rust",
+                955,
+                957,
+                "fn make_tool_result",
+                "Function",
+                "make_tool_result"
+            ])
+        );
+        // Plain-text rows carry null in the trailing optional columns.
+        assert_eq!(
+            rows[1],
+            json!(["src/query.rs", "rust", 10, 10, "let x = 1;", null, null])
+        );
+        assert_eq!(
+            rows[2],
+            json!(["src/query.rs", "rust", 20, 20, "let y = 2;", null, null])
+        );
+    }
+
+    // REF-209: top-level metadata (status/pagination/scalars) survives the reshape.
+    #[test]
+    fn test_to_columnar_preserves_metadata() {
+        let out = super::to_columnar(sample_search_response());
+        assert_eq!(out["status"], "fresh");
+        assert_eq!(out["total_count"], 2);
+        assert_eq!(out["returned_count"], 2);
+        assert_eq!(out["has_more"], false);
+        assert_eq!(out["pagination"]["total"], 2);
+        assert_eq!(out["pagination"]["limit"], 200);
+    }
+
+    // REF-209: a pure full-text result (no kind/symbol/context) stays at the five
+    // base columns — no all-null padding claws back the token saving.
+    #[test]
+    fn test_to_columnar_omits_absent_optional_columns() {
+        let data = json!({
+            "status": "fresh",
+            "pagination": {"total": 1, "count": 1, "offset": 0, "limit": 200, "has_more": false},
+            "results": [{
+                "path": "a.rs", "language": "rust",
+                "matches": [{"span": {"start_line": 1, "end_line": 1}, "preview": "struct X"}]
+            }],
+            "total_count": 1, "returned_count": 1, "has_more": false
+        });
+        let out = super::to_columnar(data);
+        let col_names: Vec<&str> = out["columns"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|c| c.as_str())
+            .collect();
+        assert_eq!(
+            col_names,
+            vec!["path", "language", "start_line", "end_line", "preview"]
+        );
+        assert_eq!(out["rows"][0], json!(["a.rs", "rust", 1, 1, "struct X"]));
+    }
+
+    // REF-209: context columns appear only when a match carries context lines.
+    #[test]
+    fn test_to_columnar_includes_context_columns_when_present() {
+        let data = json!({
+            "status": "fresh",
+            "pagination": {"total": 1, "count": 1, "offset": 0, "limit": 200, "has_more": false},
+            "results": [{
+                "path": "a.rs", "language": "rust",
+                "matches": [{
+                    "span": {"start_line": 5, "end_line": 5}, "preview": "hit",
+                    "context_before": ["above"], "context_after": ["below"]
+                }]
+            }],
+            "total_count": 1, "returned_count": 1, "has_more": false
+        });
+        let out = super::to_columnar(data);
+        let col_names: Vec<&str> = out["columns"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|c| c.as_str())
+            .collect();
+        assert_eq!(
+            col_names,
+            vec![
+                "path",
+                "language",
+                "start_line",
+                "end_line",
+                "preview",
+                "context_before",
+                "context_after"
+            ]
+        );
+        assert_eq!(
+            out["rows"][0],
+            json!(["a.rs", "rust", 5, 5, "hit", ["above"], ["below"]])
+        );
+    }
+
+    // REF-209: count-mode / non-results shapes pass through untouched, so
+    // `to_columnar` is safe to call on any success value.
+    #[test]
+    fn test_to_columnar_passthrough_non_results() {
+        let count = json!({"count": 7, "pattern": "foo"});
+        assert_eq!(super::to_columnar(count.clone()), count);
+
+        let scalar = json!("not an object");
+        assert_eq!(super::to_columnar(scalar.clone()), scalar);
     }
 
     // REF-200: tool schemas must advertise the correct default limit (200, raised from 50 in REF-191) and max cap (500)

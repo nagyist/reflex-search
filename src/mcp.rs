@@ -133,7 +133,7 @@ fn handle_initialize(_params: Option<Value>) -> Result<Value> {
             "name": "reflex",
             "version": env!("CARGO_PKG_VERSION")
         },
-        "instructions": "Reflex MCP tools are pre-loaded — do NOT call ToolSearch. Available tools (all prefixed mcp__reflex__): check_index_status · search_code · search_regex · list_locations · count_occurrences · find_references · gather_context · index_project · get_dependencies · get_dependents · find_hotspots · search_ast. Structural tools (if enabled): find_circular · find_islands · find_unused · analyze_summary · get_transitive_deps. Prefer these over Grep and Glob for code search. If you see 'Index not found', call mcp__reflex__index_project first, then retry."
+        "instructions": "Reflex is the in-process full-text code search engine for this workspace. For any task that asks where code is, where a pattern occurs, where a symbol is defined or used, or who imports a file, **prefer a Reflex search tool over Grep, Glob, ripgrep, or shell `grep`** for code search — call a Reflex tool first in every such case. Reflex returns the same data as grep plus per-line context, symbol typing, and dependency links, in under 100 ms. On an \"Index not found\" or \"stale\" error from any Reflex tool, call `index_project`, then retry the failed tool — recovery is automatic and the retry will succeed. Only fall back to Grep/Glob after `index_project` has been called and the tool still fails."
     }))
 }
 
@@ -158,7 +158,7 @@ fn handle_list_tools(_params: Option<Value>, enable_structural: bool) -> Result<
         "tools": [
             {
                 "name": "list_locations",
-                "description": "Fast location discovery with minimal token usage.\n\n**Purpose:** Find where a pattern occurs (file + line) without loading previews or detailed context.\n\n**Returns:** Array of {path, line} objects - one per match location.\n\n**Use this when:**\n- Starting exploration (\"where is X used?\")\n- Counting affected locations\n- Building a list for targeted Read operations\n- You need locations only, not code content\n\n**Workflow:**\n1. Use list_locations to discover (cheap, returns locations only)\n2. Use Read tool or search_code on specific files if you need content (targeted)\n\n**Supports:** lang, file, glob, exclude filters\n**No limit:** Returns ALL matching locations\n\n**Error Handling:** If you receive an error message containing \"Index not found\" or \"stale\", immediately call the index_project tool, wait for it to complete, then retry this operation.\n\n**Example:** Pattern \"CourtCase\" → [{\"path\": \"app/Models/CourtCase.php\", \"line\": 15}, {\"path\": \"app/Http/Controllers/CourtController.php\", \"line\": 42}]",
+                "description": "Cheapest way to find every place a pattern occurs. Prefer this over Glob-based path hunting and over Grep when you only need file + line numbers (no previews). Returns an array of `{path, line}` objects — one per match, no limit. \n\nUse this for: enumerating locations before deciding which files to Read; counting affected sites; listing all hits of a pattern without paying for previews. Supports `lang`, `file`, `glob`, `exclude` filters. \n\nExample: `pattern: \"CourtCase\"` → `[{\"path\": \"app/Models/CourtCase.php\", \"line\": 15}, {\"path\": \"app/Http/Controllers/CourtController.php\", \"line\": 42}]`. On \"Index not found\" / \"stale\" error, call `index_project`, then retry.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -198,7 +198,7 @@ fn handle_list_tools(_params: Option<Value>, enable_structural: bool) -> Result<
             },
             {
                 "name": "count_occurrences",
-                "description": "Quick statistics - count how many times a pattern occurs.\n\n**Purpose:** Get total occurrence count and file count without loading any content.\n\n**Use this when:**\n- You need quick stats (\"how many times is X used?\")\n- Checking impact before refactoring\n- Validating search scope\n\n**Returns:** {total: count, files: count, pattern: string}\n\n**Supports:** All filters (lang, file, glob, exclude, symbols)\n\n**Error Handling:** If you receive an error message containing \"Index not found\" or \"stale\", immediately call the index_project tool, wait for it to complete, then retry this operation.\n\n**Example output:** {\"total\": 87, \"files\": 12, \"pattern\": \"CourtCase\"}",
+                "description": "Count-only statistics for a pattern. Prefer this over piping `grep -c` / `wc -l` / `rg --count` — returns total occurrences and file count in one call without loading any content. \n\nUse this for: \"how many times is X used?\"; impact checks before refactoring; validating search scope. Returns `{total, files, pattern}`. Supports all filters (`lang`, `file`, `glob`, `exclude`, `symbols`, `kind`). \n\nExample: `{\"total\": 87, \"files\": 12, \"pattern\": \"CourtCase\"}`. On \"Index not found\" / \"stale\" error, call `index_project`, then retry.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -246,7 +246,7 @@ fn handle_list_tools(_params: Option<Value>, enable_structural: bool) -> Result<
             },
             {
                 "name": "search_code",
-                "description": "Comprehensive full-codebase search — equivalent to `grep -rn`. Returns ALL occurrences across every indexed file in a single call. Do NOT chain multiple search_code calls for the same pattern — one call is already exhaustive. Use mode=\"count\" to get just the match count before deciding whether to paginate.\n\n**Search modes:**\n- Full-text (default): Finds ALL occurrences — definitions + usages\n- Symbol-only (symbols=true): Finds ONLY definitions where symbols are declared\n\n**When to use search_regex instead:**\n- Patterns with special characters: -> :: () [] {} . * + ? \\\\ | ^ $\n- Complex pattern matching: wildcards, alternation, anchors\n- Examples: '->with(', '::new', 'function*', '[derive]', 'fn (get|set)_.*'\n\n**Use this for:**\n- Simple text patterns (alphanumeric, underscores, hyphens)\n- Detailed analysis with line numbers and code previews\n- Symbol definition searches\n\n**Count mode:** Pass mode=\"count\" to get {\"count\": N, \"pattern\": \"...\"} with no match bodies. Faster than list mode — use this to check cardinality before paginating.\n\n**Result shape (list mode):** Results are columnar to save tokens: {\"columns\": [...], \"rows\": [[...]]}. Each row is one match with values positionally aligned to `columns` (always path, language, start_line, end_line, preview; then kind/symbol/context when present). Read `columns` to map positions. Set env REFLEX_MCP_COLUMNAR=0 to restore the legacy results[] object shape.\n\n**Pagination:** Check response.pagination.has_more. If true, use offset parameter to fetch next page.\n\n**Error Handling:** If you receive an error message containing \"Index not found\" or \"stale\", immediately call the index_project tool, wait for it to complete, then retry this operation.",
+                "description": "Default code search across the whole codebase. Prefer this over Grep / `grep -rn` / Glob for any pattern made of letters, digits, underscores, or hyphens — one call returns every occurrence with file paths, line numbers, and code previews. Use this for: finding where a pattern occurs; listing all usages of a function/class/variable; finding a symbol's definition (with `symbols: true`); getting line numbers + previews in a single call. \n\nModes: full-text by default (definitions + usages); `symbols: true` returns definitions only; `mode: \"count\"` returns just `{count, pattern}` to check cardinality before paginating. For patterns containing special characters (`->`, `::`, `()`, `[]`, `.*+?\\|^$`), use `search_regex` instead. \n\nResult shape is columnar: `{columns, rows}` — each row aligns positionally to `columns` (path, language, start_line, end_line, preview; then kind/symbol/context when present). Set env `REFLEX_MCP_COLUMNAR=0` for the legacy `results[]` shape. \n\nPagination: if `response.pagination.has_more` is true, fetch the next page with the `offset` parameter. On \"Index not found\" / \"stale\" error, call `index_project`, then retry.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -323,7 +323,7 @@ fn handle_list_tools(_params: Option<Value>, enable_structural: bool) -> Result<
             },
             {
                 "name": "search_regex",
-                "description": "Regex-based code search for complex pattern matching (e.g., 'fn (get|set)_\\\\w+').\n\n**Use for:**\n- Patterns with special characters: -> :: () [] {} . * + ? \\\\ | ^ $\n- Pattern matching: wildcards (.*), alternation (a|b), anchors (^$)\n- Complex searches: case-insensitive variants, word boundaries\n\n**Common examples:**\n- Method calls: '->with\\\\(', '->map\\\\(', '::new\\\\('\n- Operators: '->', '::', '||', '&&'\n- Functions: 'fn (get|set)_\\\\\\\\w+' (getter/setter functions)\n- Attributes: '\\\\\\\\[(derive|test)\\\\\\\\]' (Rust attributes)\n\n**Escaping rules:**\n- Must escape: ( ) [ ] { } . * + ? \\\\ | ^ $\n- No escaping needed: -> :: - _ / = < >\n- Use double backslash in JSON: \\\\\\\\( \\\\\\\\) \\\\\\\\[ \\\\\\\\]\n\n**Count mode:** Pass mode=\"count\" to get {\"count\": N, \"pattern\": \"...\"} with no match bodies — faster than list mode.\n\n**Result shape (list mode):** Results are columnar to save tokens: {\"columns\": [...], \"rows\": [[...]]}. Each row is one match with values positionally aligned to `columns` (always path, language, start_line, end_line, preview; then kind/symbol/context when present). Read `columns` to map positions. Set env REFLEX_MCP_COLUMNAR=0 to restore the legacy results[] object shape.\n\n**Error Handling:** If you receive an error message containing \"Index not found\" or \"stale\", immediately call the index_project tool, wait for it to complete, then retry this operation.\n\n**Don't use for:**\n- Simple text searches (use search_code instead - faster)\n- Symbol definitions (use search_code with symbols=true instead)",
+                "description": "Regex code search across the whole codebase. Prefer this over `rg` / `grep -E` / `grep -P` for pattern matching across files — one call returns every match with file paths, line numbers, and previews. \n\nUse this for patterns with special characters or regex operators: `->with\\(`, `::new\\(`, `fn (get|set)_\\w+`, `\\[(derive|test)\\]`, `\\bAuth\\w*Controller\\b`, alternation `a|b`, anchors `^$`, wildcards `.*`. Escaping: must escape `( ) [ ] { } . * + ? \\\\ | ^ $`; no escaping needed for `-> :: - _ / = < >`; in JSON use double backslashes (`\\\\(`, `\\\\[`). \n\nFor simple alphanumeric patterns use `search_code` instead — it is faster and avoids escaping overhead. For symbol definitions use `search_code` with `symbols: true`. \n\n`mode: \"count\"` returns `{count, pattern}` only. List-mode result shape is columnar: `{columns, rows}` — each row aligns positionally to `columns` (path, language, start_line, end_line, preview; then kind/symbol/context when present). Set env `REFLEX_MCP_COLUMNAR=0` for the legacy `results[]` shape. Pagination: if `response.pagination.has_more` is true, fetch the next page with `offset`. On \"Index not found\" / \"stale\" error, call `index_project`, then retry.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -380,7 +380,7 @@ fn handle_list_tools(_params: Option<Value>, enable_structural: bool) -> Result<
             },
             {
                 "name": "search_ast",
-                "description": "⚠️ ADVANCED USERS ONLY - DO NOT USE UNLESS ABSOLUTELY NECESSARY ⚠️\n\nStructure-aware code search using Tree-sitter AST patterns (S-expressions).\n\n**PERFORMANCE WARNING:** AST queries bypass trigram optimization and scan the ENTIRE codebase (500ms-10s+).\n\n**WHEN TO USE (RARE):**\n- You need to match code structure, not just text (e.g., \"all async functions with try/catch blocks\")\n- --symbols search is insufficient (e.g., need to match specific AST node types)\n- You have a very specific structural pattern that cannot be expressed as text\n\n**IN 95% OF CASES, USE search_code with symbols=true INSTEAD** (10-100x faster).\n\n**REQUIRED:** You MUST use glob patterns to limit scope (e.g., glob=['src/**/*.rs']) to avoid scanning thousands of files.\n\n**Token efficiency:** Previews are auto-truncated to ~100 chars. Use limit parameter to control result count.\n\n**Error Handling:** If you receive an error message containing \"Index not found\" or \"stale\", immediately call the index_project tool, wait for it to complete, then retry this operation.\n\n**Example AST patterns:**\n- Rust: '(function_item) @fn' (all functions)\n- Python: '(function_definition) @fn' (all functions)\n- TypeScript: '(class_declaration) @class' (all classes)\n\nRefer to Tree-sitter documentation for each language's grammar.",
+                "description": "Structure-aware search using Tree-sitter AST patterns (S-expressions). ⚠️ SLOW: bypasses trigram optimization and scans the ENTIRE codebase (500ms-10s+). In 95% of cases, prefer `search_code` with `symbols: true` instead (10-100x faster). \n\nUse this only when you must match code structure rather than text: \"all async functions containing a `match` expression\", \"every class with a `serialize` method\", etc. You MUST pass `glob` to limit scope — without it, every file in the codebase is parsed. \n\nExample patterns — Rust: `(function_item) @fn`; Python: `(function_definition) @fn`; TypeScript: `(class_declaration) @class`. Refer to Tree-sitter grammar docs for each language. On \"Index not found\" / \"stale\" error, call `index_project`, then retry.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -432,7 +432,7 @@ fn handle_list_tools(_params: Option<Value>, enable_structural: bool) -> Result<
             },
             {
                 "name": "index_project",
-                "description": "Rebuild or update the code search index. Run this when:\n\n- After code changes (user edits, git operations, file creation/deletion)\n- Search results seem stale or missing new files\n- Empty/error results (may indicate missing/corrupt index)\n\n**Modes:**\n- Incremental (default): Only re-indexes changed files (fast)\n- Full rebuild (force=true): Re-indexes everything (use if index seems corrupted)",
+                "description": "Rebuild or update the code search index. Call this whenever any Reflex search tool returns an \"Index not found\" or \"stale\" error — the retry will then succeed. Also call after large git operations (checkout, merge, rebase, pull), user file edits, or when results seem stale or missing. \n\nIncremental by default (only changed files re-indexed). Pass `force: true` for a full rebuild when the index appears corrupted.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -450,7 +450,7 @@ fn handle_list_tools(_params: Option<Value>, enable_structural: bool) -> Result<
             },
             {
                 "name": "get_dependencies",
-                "description": "Get all dependencies (imports) of a specific file.\n\n**Purpose:** Analyze what modules/files a given file imports.\n\n**Returns:** Array of dependency objects with import path, line number, type (internal/external/stdlib), and optional symbols.\n\n**Use this when:**\n- Understanding file dependencies\n- Analyzing import structure\n- Finding what a file depends on\n\n**IMPORTANT:** Only extracts **static imports** (string literals). Dynamic imports (variables, template literals, expressions) are automatically filtered by tree-sitter query design. See CLAUDE.md section \"Dependency/Import Extraction\" for details.\n\n**Note:** Path matching is fuzzy - supports exact paths, fragments, or just filenames.",
+                "description": "List every import (dependency) of a single file. Prefer this over grep-ing for `import` / `use` / `require` statements — Reflex answers from its pre-built import index, which grep cannot replicate without scanning every file. Returns one object per import with path, line, type (internal/external/stdlib), and optional symbols. \n\nUse this for: understanding file dependencies, analyzing import structure, finding what a file depends on. Path matching is fuzzy — exact paths, fragments, or bare filenames all work. Only static imports (string literals) are extracted; dynamic imports are filtered by design. On \"Index not found\" / \"stale\" error, call `index_project`, then retry.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -464,7 +464,7 @@ fn handle_list_tools(_params: Option<Value>, enable_structural: bool) -> Result<
             },
             {
                 "name": "get_dependents",
-                "description": "Get all files that depend on (import) a specific file.\n\n**Purpose:** Find what other files import this file (reverse dependency lookup).\n\n**Returns:** Array of file paths that import the specified file.\n\n**Use this when:**\n- Understanding impact of changes\n- Finding usages of a module\n- Analyzing file importance\n\n**IMPORTANT:** Only considers **static imports** (string literals). Dynamic imports are filtered. See CLAUDE.md section \"Dependency/Import Extraction\" for details.\n\n**Note:** Path matching is fuzzy - supports exact paths, fragments, or just filenames.",
+                "description": "Reverse dependency lookup — find every file that imports a given file. Prefer this over grep-based find-callers: Reflex answers from its pre-built reverse-import index in one call, which grep cannot replicate without scanning every file. Returns the list of importing file paths. \n\nUse this for: impact analysis before changing a module; finding consumers of a library; detecting file importance. Path matching is fuzzy — exact paths, fragments, or bare filenames all work. Only static imports (string literals) are considered; dynamic imports are filtered by design. On \"Index not found\" / \"stale\" error, call `index_project`, then retry.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -478,7 +478,7 @@ fn handle_list_tools(_params: Option<Value>, enable_structural: bool) -> Result<
             },
             {
                 "name": "get_transitive_deps",
-                "description": "Get transitive dependencies of a file up to a specified depth.\n\n**Purpose:** Find not just direct dependencies, but dependencies of dependencies (the full dependency tree).\n\n**Returns:** Object mapping file IDs to their depth in the dependency tree.\n\n**Use this when:**\n- Understanding full dependency chain\n- Analyzing deep coupling\n- Planning refactoring impact\n\n**IMPORTANT:** Only follows **static imports** (string literals). Dynamic imports are filtered. See CLAUDE.md section \"Dependency/Import Extraction\" for details.\n\n**Example:** depth=2 finds: file → deps → deps of deps",
+                "description": "Walk the transitive dependency tree of a file up to `depth` levels (default 3). Prefer this over hand-rolling recursive grep across imports — Reflex traverses the static import graph directly, returning a map of file → depth. \n\nUse this for: understanding the full dependency chain, analyzing deep coupling, planning refactoring blast radius. Example: `depth=2` finds file → deps → deps of deps. Only static imports (string literals) are followed; dynamic imports are filtered by design. On \"Index not found\" / \"stale\" error, call `index_project`, then retry.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -496,7 +496,7 @@ fn handle_list_tools(_params: Option<Value>, enable_structural: bool) -> Result<
             },
             {
                 "name": "find_hotspots",
-                "description": "Find the most-imported files in the codebase (dependency hotspots). This is the definitive tool for 'which file is imported by the most other files' — Reflex answers this in one call from its pre-built dependency index, which grep cannot do without scanning every file.\n\n**Purpose:** Identify files that many other files depend on — critical path analysis, refactoring impact estimation, and architecture review.\n\n**Pagination:** Default limit of 200 results per page. Check response.pagination.has_more to fetch more pages.\n\n**Sorting:** Default order is descending (most imports first). Use sort parameter to change.\n\n**Returns:** Object with pagination metadata and array of {path, import_count} objects sorted by import count.\n\n**Use this when:**\n- Finding critical files (\"what does every module depend on?\")\n- Identifying potential bottlenecks before refactoring\n- Understanding module boundaries and coupling\n- Planning refactoring priorities by blast radius\n\n**IMPORTANT:** Only counts **static imports** (string literals). Dynamic imports are filtered. See CLAUDE.md section \"Dependency/Import Extraction\" for details.\n\n**Example output:** {\"pagination\": {...}, \"results\": [{\"path\": \"src/models.rs\", \"import_count\": 27}]}",
+                "description": "Rank files by how many other files import them (dependency hotspots). Prefer this over any grep-based \"most-imported file\" heuristic — Reflex answers from its pre-built dependency index in one call; grep cannot answer this without scanning every file. \n\nUse this for: finding critical-path files; identifying refactoring blast radius; ranking modules by coupling; architecture review. Returns `{pagination, results: [{path, import_count}]}` sorted by import count (desc by default; use `sort` to change). Default page size 200; if `pagination.has_more` is true, fetch the next page with `offset`. Only static imports are counted. On \"Index not found\" / \"stale\" error, call `index_project`, then retry. \n\nExample: `{\"results\": [{\"path\": \"src/models.rs\", \"import_count\": 27}]}`",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -521,7 +521,7 @@ fn handle_list_tools(_params: Option<Value>, enable_structural: bool) -> Result<
             },
             {
                 "name": "find_circular",
-                "description": "Detect circular dependencies in the codebase.\n\n**Purpose:** Find dependency cycles (A → B → C → A).\n\n**Pagination:** Default limit of 200 results per page. Check response.pagination.has_more to fetch more pages.\n\n**Sorting:** Default order is descending (longest cycles first). Use sort parameter to change.\n\n**Returns:** Object with pagination metadata and array of cycles, where each cycle is an array of file paths forming the circular path.\n\n**Use this when:**\n- Debugging circular dependency issues\n- Improving code architecture\n- Validating refactoring\n\n**IMPORTANT:** Only detects cycles in **static imports** (string literals). Dynamic imports are filtered. See CLAUDE.md section \"Dependency/Import Extraction\" for details.\n\n**Note:** Circular dependencies can cause compilation issues and indicate architectural problems.\n\n**Example output:** {\"pagination\": {...}, \"results\": [{\"paths\": [\"a.rs\", \"b.rs\", \"a.rs\"]}]}",
+                "description": "Detect circular dependencies (cycles A → B → C → A) in the static import graph. Prefer this over manually grepping for import chains — Reflex does the cycle detection directly. Returns `{pagination, results: [{paths: [\"a.rs\", \"b.rs\", \"a.rs\"]}]}`, sorted with longest cycles first by default. Default page size 200; if `pagination.has_more` is true, fetch the next page with `offset`. Only static imports are considered. On \"Index not found\" / \"stale\" error, call `index_project`, then retry.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -542,7 +542,7 @@ fn handle_list_tools(_params: Option<Value>, enable_structural: bool) -> Result<
             },
             {
                 "name": "find_unused",
-                "description": "Find unused files that no other files import.\n\n**Purpose:** Identify orphaned files that could be safely removed.\n\n**Pagination:** Default limit of 200 results per page. Check response.pagination.has_more to fetch more pages.\n\n**Returns:** Object with pagination metadata and flat array of file path strings (no wrapping objects).\n\n**Use this when:**\n- Cleaning up dead code\n- Reducing codebase size\n- Identifying test-only or entry-point files\n\n**Note:** Entry points (main.rs, index.ts) will appear as unused but should not be deleted.\n\n**Example output:** {\"pagination\": {...}, \"results\": [\"src/unused.rs\", \"tests/old.rs\"]}",
+                "description": "List files that no other file imports — orphan candidates for deletion. Prefer this over manual Glob + Grep cross-referencing — Reflex answers from the static import graph in one call. Returns `{pagination, results: [\"src/unused.rs\", \"tests/old.rs\", ...]}`. Default page size 200; if `pagination.has_more` is true, fetch the next page with `offset`. Note: entry points (`main.rs`, `index.ts`) appear as unused by design — do not delete them. Only static imports are considered. On \"Index not found\" / \"stale\" error, call `index_project`, then retry.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -559,7 +559,7 @@ fn handle_list_tools(_params: Option<Value>, enable_structural: bool) -> Result<
             },
             {
                 "name": "find_islands",
-                "description": "Find disconnected components (islands) in the dependency graph.\n\n**Purpose:** Identify groups of files that are isolated from the rest of the codebase (no dependencies between groups).\n\n**Pagination:** Default limit of 200 results per page. Check response.pagination.has_more to fetch more pages.\n\n**Sorting:** Default order is descending (largest islands first). Use sort parameter to change.\n\n**Returns:** Object with pagination metadata and array of islands, where each island contains multiple file paths that depend on each other.\n\n**Use this when:**\n- Identifying isolated subsystems\n- Understanding codebase modularity\n- Finding potential code splitting opportunities\n- Detecting disconnected feature modules\n\n**IMPORTANT:** Only considers **static imports** (string literals). Dynamic imports are filtered. See CLAUDE.md section \"Dependency/Import Extraction\" for details.\n\n**Size filtering:** Use min_island_size and max_island_size to filter by component size. Default: 2-500 files (or 50% of total files).\n\n**Example output:** {\"pagination\": {...}, \"results\": [{\"island_id\": 1, \"size\": 5, \"paths\": [\"a.rs\", \"b.rs\", \"c.rs\", \"d.rs\", \"e.rs\"]}]}",
+                "description": "Find disconnected components (islands) in the static import graph — groups of files that have no imports crossing group boundaries. Prefer this over manual Glob + Grep cluster analysis — Reflex computes the connected components directly. Returns `{pagination, results: [{island_id, size, paths: [...]}]}` sorted with largest islands first by default. Default page size 200; if `pagination.has_more` is true, fetch the next page with `offset`. Use `min_island_size` and `max_island_size` to filter by component size (default: 2–500 files, or 50% of total). Only static imports are considered. On \"Index not found\" / \"stale\" error, call `index_project`, then retry.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -588,7 +588,7 @@ fn handle_list_tools(_params: Option<Value>, enable_structural: bool) -> Result<
             },
             {
                 "name": "analyze_summary",
-                "description": "Get a summary of all dependency analyses.\n\n**Purpose:** Quick overview of codebase dependency health.\n\n**Returns:** Object with counts: {circular_dependencies, hotspots, unused_files, islands, min_dependents}\n\n**Use this when:**\n- Getting a quick health check of the codebase\n- Understanding overall dependency structure\n- Deciding which specific analysis to run next\n\n**IMPORTANT:** Only considers **static imports** (string literals). Dynamic imports are filtered. See CLAUDE.md section \"Dependency/Import Extraction\" for details.\n\n**Example output:** {\"circular_dependencies\": 17, \"hotspots\": 10, \"unused_files\": 82, \"islands\": 81, \"min_dependents\": 2}",
+                "description": "One-call overview of codebase dependency health. Prefer this over running `find_circular` + `find_hotspots` + `find_unused` + `find_islands` individually — returns aggregate counts so the agent can decide which specific analysis to drill into. Returns `{circular_dependencies, hotspots, unused_files, islands, min_dependents}`. Only static imports are considered. On \"Index not found\" / \"stale\" error, call `index_project`, then retry. \n\nExample: `{\"circular_dependencies\": 17, \"hotspots\": 10, \"unused_files\": 82, \"islands\": 81, \"min_dependents\": 2}`",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -601,7 +601,7 @@ fn handle_list_tools(_params: Option<Value>, enable_structural: bool) -> Result<
             },
             {
                 "name": "find_references",
-                "description": "Find ALL code locations that reference a symbol or pattern in a single call — do NOT chain with search_code for the same pattern; this already covers the full codebase.\n\n**Purpose:** Eliminates the two-step pattern of search_code(symbols=true) + search_code(). Returns both the definition and all usages atomically in one call. Results are complete — no need to follow up with additional searches.\n\n**Filtering:** By default, matches inside string literals and comments are excluded (e.g., test fixture strings, doc comments). Pass `include_strings: true` to restore all occurrences.\n\n**Returns:** {definition, references, total_references, pagination, status}\n\n**Use this when:**\n- \"Find all callers of X\" — the most common agent refactoring pattern\n- Code review: understand impact before changing a function or class\n- Rename planning: see every site that needs updating\n- Dead code detection: confirm nothing calls a function before removing it\n\n**definition:** First matching symbol definition {path, line, kind, symbol, span, preview}, or null if no symbol definition exists for the pattern.\n\n**references:** Flat array of {path, line, preview} — all textual occurrences including the definition site itself.\n\n**Pagination applies to references only.** Use limit and offset. Check pagination.has_more for more pages.\n\n**Error Handling:** If you receive an error message containing \"Index not found\" or \"stale\", immediately call the index_project tool, wait for it to complete, then retry this operation.",
+                "description": "Atomic symbol definition + every usage in one call. Prefer this over the two-step Grep-based find-all-callers pattern (`grep -rn X` then filter to call sites by eye) and over chaining `search_code(symbols=true) + search_code()` — `find_references` returns both the definition and all call sites in a single call, complete with no follow-up searches needed. \n\nUse this for: \"find all callers of X\" (the most common agent refactoring task); impact analysis before changing a function or class; rename planning; dead-code detection before deleting a function. \n\nBy default, matches inside string literals and comments are excluded (so test fixtures and doc comments don't drown out real call sites); pass `include_strings: true` to restore all occurrences. Returns `{definition, references, total_references, pagination, status}` where `definition` is the first symbol definition (`{path, line, kind, symbol, span, preview}`) or null, and `references` is a flat array of `{path, line, preview}` covering every textual occurrence including the definition site itself. Pagination applies to `references` only; if `pagination.has_more` is true, fetch the next page with `offset`. On \"Index not found\" / \"stale\" error, call `index_project`, then retry.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -654,7 +654,7 @@ fn handle_list_tools(_params: Option<Value>, enable_structural: bool) -> Result<
             },
             {
                 "name": "gather_context",
-                "description": "Collects comprehensive codebase information.\n\n**Parameters:**\n- `structure` (bool): Show directory tree\n- `file_types` (bool): Show file type distribution\n- `project_type` (bool): Detect project type (CLI/library/webapp)\n- `framework` (bool): Detect frameworks (React, Django, etc.)\n- `entry_points` (bool): Find main/index files\n- `test_layout` (bool): Show test organization\n- `config_files` (bool): List configuration files\n- `depth` (int): Tree depth for structure (default: 2)\n- `path` (string, optional): Focus on specific directory\n\n**When to use:**\n- Understanding project structure and organization\n- Finding which frameworks/languages are used\n- Locating entry points and test layouts\n- Getting file statistics and distribution\n\n**When NOT to use:**\n- Finding conceptual/architectural information (use search_documentation)\n- Understanding high-level how things work (use search_documentation)\n\n**Note:** By default (no parameters), all context types are gathered.",
+                "description": "One-shot codebase orientation: structure, file types, project type, frameworks, entry points, test layout, config files. Prefer this over Glob-based recon at session start — Reflex returns a single consolidated overview instead of multiple glob calls. By default (no parameters) all context types are gathered; pass individual flags (`structure`, `framework`, `entry_points`, etc.) for a focused slice. Use `depth` to control tree depth (default 2) and `path` to focus on a subdirectory. \n\nUse this for: getting oriented in an unfamiliar codebase; locating entry points; confirming which frameworks/languages are in use. For finding where a specific symbol/pattern lives, use `search_code` or `find_references` instead.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -699,7 +699,7 @@ fn handle_list_tools(_params: Option<Value>, enable_structural: bool) -> Result<
             },
             {
                 "name": "check_index_status",
-                "description": "Check whether the Reflex search index is fresh, stale, or missing — without running any search.\n\n**CALL THIS FIRST** at the start of every session and before any significant search task. If the index is stale or missing, call index_project before searching.\n\n**Returns:**\n- `status`: `\"fresh\"` | `\"stale\"` | `\"missing\"`\n- `reason`: why the index is stale (branch not indexed, commit changed, files modified)\n- `action_required`: command to fix the issue (always `rfx index` when stale)\n- `files_modified`: number of recently modified files detected (only present for mtime-based staleness)\n\n**When to call:**\n- At the start of every agent session\n- Before any bulk search or refactoring task\n- After a git operation (checkout, merge, rebase, pull)\n\n**Example fresh response:** `{\"status\": \"fresh\"}`\n**Example stale response:** `{\"status\": \"stale\", \"reason\": \"Commit changed from abc1234 to def5678\", \"action_required\": \"rfx index\"}`",
+                "description": "Check whether the Reflex search index is fresh, stale, or missing — without running any search. Call this once at session start and before any bulk search/refactoring task; if `status` is stale or missing, call `index_project` before searching. \n\nReturns `{status: \"fresh\" | \"stale\" | \"missing\", reason, action_required, files_modified?}`. Useful after git operations (checkout, merge, rebase, pull) that may have moved HEAD off the indexed commit; `reason` explains the staleness and `action_required` gives the fix command (always `rfx index` when stale). \n\nExample fresh: `{\"status\": \"fresh\"}`. Example stale: `{\"status\": \"stale\", \"reason\": \"Commit changed from abc1234 to def5678\", \"action_required\": \"rfx index\"}`",
                 "inputSchema": {
                     "type": "object",
                     "properties": {}
@@ -2417,6 +2417,12 @@ mod tests {
 
     // REF-197: initialize handshake must carry the MCP `instructions` field that
     // nudges clients to prefer reflex tools (moved out of the per-repo CLAUDE.md).
+    //
+    // Stage 1 of the client-agnostic instructions rewrite: the universal base
+    // directive must be present, must name the `index_project` recovery step,
+    // and must carry the "prefer Reflex over Grep/Glob/ripgrep" directive.
+    // The Claude-Code-specific `mcp__reflex__` addendum is no longer emitted on
+    // a generic `clientInfo.name` — see Stage 2's gated-addendum tests.
     #[test]
     fn test_initialize_includes_instructions() {
         let req = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}"#;
@@ -2428,12 +2434,26 @@ mod tests {
             .expect("instructions must be a string");
         assert!(!instructions.is_empty(), "instructions must be non-empty");
         assert!(
-            instructions.contains("mcp__reflex__"),
-            "instructions must reference the mcp__reflex__ tool prefix"
-        );
-        assert!(
             instructions.contains("index_project"),
             "instructions must mention the index_project recovery step"
+        );
+        assert!(
+            instructions.to_lowercase().contains("prefer"),
+            "instructions must carry the prefer-Reflex directive"
+        );
+        assert!(
+            instructions.to_lowercase().contains("grep"),
+            "instructions must name the native tools Reflex replaces (grep/glob/ripgrep)"
+        );
+        // The Claude-Code-isms (`mcp__reflex__`, ToolSearch) are gated behind the
+        // addendum path (Stage 2). A generic client must NOT receive them.
+        assert!(
+            !instructions.contains("mcp__reflex__"),
+            "generic client must not receive the Claude-Code addendum"
+        );
+        assert!(
+            !instructions.contains("ToolSearch"),
+            "generic client must not receive the Claude-Code ToolSearch nudge"
         );
 
         // Pre-existing handshake fields must be unchanged.

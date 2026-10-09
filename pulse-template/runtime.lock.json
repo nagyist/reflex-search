@@ -1,17 +1,17 @@
 {
   "schema": 1,
   "deps_hash": "c4431504bb22",
-  "release_base": "https://github.com/reflex-search/reflex/releases/download",
+  "release_base": "https://github.com/nagyist/reflex-search/releases/download",
   "assets": {
     "darwin-arm64": {
       "name": "pulse-runtime-c4431504bb22-darwin-arm64.tar.zst",
-      "sha256": "afe81e089e3078fdb4ad981369695de0def0896510b4df9651792ac2e2a1974a",
-      "size": 30773407
+      "sha256": "7536a02bd1ef87d51a4f47384cb4e582c88e3f30d54027fce18c06dc42b3d8e3",
+      "size": 30776263
     },
     "darwin-x64": {
       "name": "pulse-runtime-c4431504bb22-darwin-x64.tar.zst",
-      "sha256": "cc7480bae0a457dff887cd67ab891ea7c98dc90f3c6e5147385af50ac5c04ddf",
-      "size": 32240291
+      "sha256": "d31b9147c93b1f6b94c80e1ba8f0d65a0fb2429312058b0cfd191f0e12b101a9",
+      "size": 32240588
     },
     "linux-arm64": {
       "name": "pulse-runtime-c4431504bb22-linux-arm64.tar.zst",
